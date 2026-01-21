@@ -12,8 +12,10 @@
 #include <vector>
 #include <algorithm>
 #include <iterator>
+#define NOMINMAX
 #include <windows.h>
 #include <winhttp.h>
+
 
 namespace {
     beacon::TaskType stringToTaskType(const std::string& str) {
