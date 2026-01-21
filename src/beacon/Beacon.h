@@ -4,6 +4,7 @@
 #include <vector>
 #include "../external/concurrentqueue/concurrentqueue.h"
 #include "Task.h"
+#include "TaskDispatcher.h"
 
 namespace beacon {
 
@@ -24,6 +25,7 @@ private:
     double c2FetchBackoff_;
     moodycamel::ConcurrentQueue<Result> pendingResults_;
     std::vector<Result> inFlightResults_;
+    TaskDispatcher taskDispatcher_;
 
     void sleepWithJitter();
 };

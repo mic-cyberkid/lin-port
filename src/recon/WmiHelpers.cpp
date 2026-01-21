@@ -1,0 +1,107 @@
+#include "WmiHelpers.h"
+#include <stdexcept>
+
+namespace recon {
+
+WmiResult::WmiResult(IWbemClassObject* obj) : pObj_(obj) {
+    if (pObj_) {
+        pObj_->AddRef();
+    }
+}
+
+WmiResult::~WmiResult() {
+    if (pObj_) {
+        pObj_->Release();
+    }
+}
+
+std::wstring WmiResult::getString(const wchar_t* propName) {
+    VARIANT vtProp;
+    VariantInit(&vtProp);
+    if (SUCCEEDED(pObj_->Get(propName, 0, &vtProp, 0, 0)) && vtProp.vt == VT_BSTR) {
+        std::wstring result(vtProp.bstrVal);
+        VariantClear(&vtProp);
+        return result;
+    }
+    VariantClear(&vtProp);
+    return L"";
+}
+
+int WmiResult::getInt(const wchar_t* propName) {
+    VARIANT vtProp;
+    VariantInit(&vtProp);
+    if (SUCCEEDED(pObj_->Get(propName, 0, &vtProp, 0, 0)) && (vtProp.vt == VT_I4 || vtProp.vt == VT_UI4)) {
+        int result = vtProp.intVal;
+        VariantClear(&vtProp);
+        return result;
+    }
+    VariantClear(&vtProp);
+    return 0;
+}
+
+unsigned long long WmiResult::getUnsignedLongLong(const wchar_t* propName) {
+    VARIANT vtProp;
+    VariantInit(&vtProp);
+    if (SUCCEEDED(pObj_->Get(propName, 0, &vtProp, 0, 0)) && (vtProp.vt == VT_UI8 || vtProp.vt == VT_I8)) {
+        unsigned long long result = vtProp.ullVal;
+        VariantClear(&vtProp);
+        return result;
+    }
+    VariantClear(&vtProp);
+    return 0;
+}
+
+
+WmiSession::WmiSession() {
+    IWbemLocator* pLoc = nullptr;
+    HRESULT hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
+    if (FAILED(hres)) {
+        throw std::runtime_error("Failed to create WbemLocator instance.");
+    }
+
+    hres = pLoc->ConnectServer(_bstr_t(L"ROOT\\CIMV2"), NULL, NULL, 0, 0, 0, 0, &pSvc_);
+    pLoc->Release();
+    if (FAILED(hres)) {
+        throw std::runtime_error("Failed to connect to WMI service.");
+    }
+
+    hres = CoSetProxyBlanket(pSvc_, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
+        RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+    if (FAILED(hres)) {
+        pSvc_->Release();
+        throw std::runtime_error("Failed to set proxy blanket.");
+    }
+    comSecurityInitialized_ = true;
+}
+
+WmiSession::~WmiSession() {
+    if (pSvc_) {
+        pSvc_->Release();
+    }
+}
+
+std::vector<WmiResult> WmiSession::execQuery(const std::wstring& query) {
+    IEnumWbemClassObject* pEnumerator = nullptr;
+    HRESULT hres = pSvc_->ExecQuery(_bstr_t(L"WQL"), _bstr_t(query.c_str()),
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
+    if (FAILED(hres)) {
+        throw std::runtime_error("WMI query failed.");
+    }
+
+    std::vector<WmiResult> results;
+    IWbemClassObject* pclsObj = nullptr;
+    ULONG uReturn = 0;
+    while (pEnumerator) {
+        pEnumerator->Next(static_cast<long>(WBEM_INFINITE), 1, &pclsObj, &uReturn);
+        if (0 == uReturn) {
+            break;
+        }
+        results.emplace_back(pclsObj);
+        pclsObj->Release();
+    }
+    pEnumerator->Release();
+
+    return results;
+}
+
+} // namespace recon
