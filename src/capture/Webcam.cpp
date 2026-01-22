@@ -1,5 +1,6 @@
 #include "Webcam.h"
 #include <string>
+#include "../utils/Logger.h"
 
 // Note: Real VFW or MediaFoundation implementation is verbose.
 // For Phase 4 verification, we will return a stub or error if no camera.
@@ -85,29 +86,36 @@ namespace {
         char windowName[] = "CamCap";
         HWND hWebcam = capCreateCaptureWindowA(windowName, WS_CHILD, 0, 0, 320, 240, GetDesktopWindow(), 0);
         
-        if (!hWebcam) return {};
+        if (!hWebcam) {
+            LOG_ERR("Failed to create capture window.");
+            return {};
+        }
 
         std::vector<BYTE> buffer;
 
         // 2. Connect to driver 0
-        if (SendMessage(hWebcam, WM_CAP_DRIVER_CONNECT, 0, 0)) {
+        if (capDriverConnect(hWebcam, 0)) {
+            Sleep(200); // Allow driver to connect
             // 3. Grab Frame
-            SendMessage(hWebcam, WM_CAP_GRAB_FRAME, 0, 0);
-            
-            // 4. Save to Clipboard or File? 
-            // VFW makes getting raw bytes hard without callback.
-            // Easy way: Save to temp file (DIB)
-            
-            char tempPath[MAX_PATH];
-            GetTempPathA(MAX_PATH, tempPath);
-            std::string bmpPath = std::string(tempPath) + "cam.bmp";
-            
-            if (SendMessage(hWebcam, WM_CAP_FILE_SAVEDIB, 0, (LPARAM)bmpPath.c_str())) {
-                buffer = ConvertBmpToJpeg(bmpPath);
-                DeleteFileA(bmpPath.c_str());
+            if (capGrabFrame(hWebcam)) {
+                // 4. Save to temp file (DIB)
+                char tempPath[MAX_PATH];
+                GetTempPathA(MAX_PATH, tempPath);
+                std::string bmpPath = std::string(tempPath) + "cam.bmp";
+
+                if (capFileSaveDIB(hWebcam, bmpPath.c_str())) {
+                    buffer = ConvertBmpToJpeg(bmpPath);
+                    DeleteFileA(bmpPath.c_str());
+                } else {
+                    LOG_ERR("Failed to save DIB from webcam.");
+                }
+            } else {
+                LOG_ERR("Failed to grab frame from webcam.");
             }
 
-            SendMessage(hWebcam, WM_CAP_DRIVER_DISCONNECT, 0, 0);
+            capDriverDisconnect(hWebcam);
+        } else {
+            LOG_ERR("Failed to connect to webcam driver.");
         }
         
         DestroyWindow(hWebcam);
