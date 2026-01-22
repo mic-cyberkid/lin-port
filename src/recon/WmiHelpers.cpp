@@ -90,14 +90,16 @@ unsigned long long WmiResult::getUnsignedLongLong(const wchar_t* propName) {
 }
 
 
-WmiSession::WmiSession() {
+WmiSession::WmiSession() : WmiSession(L"ROOT\\CIMV2") {}
+
+WmiSession::WmiSession(const std::wstring& nameSpace) {
     IWbemLocator* pLoc = nullptr;
     HRESULT hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
     if (FAILED(hres)) {
         throw std::runtime_error("Failed to create WbemLocator instance.");
     }
 
-    hres = pLoc->ConnectServer(_bstr_t(L"ROOT\\CIMV2"), NULL, NULL, 0, 0, 0, 0, &pSvc_);
+    hres = pLoc->ConnectServer(_bstr_t(nameSpace.c_str()), NULL, NULL, 0, 0, 0, 0, &pSvc_);
     pLoc->Release();
     if (FAILED(hres)) {
         throw std::runtime_error("Failed to connect to WMI service.");

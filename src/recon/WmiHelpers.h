@@ -33,6 +33,7 @@ private:
 class WmiSession {
 public:
     WmiSession();
+    WmiSession(const std::wstring& nameSpace);
     ~WmiSession();
 
     std::vector<WmiResult> execQuery(const std::wstring& query);
