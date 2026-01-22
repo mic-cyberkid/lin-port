@@ -19,10 +19,7 @@ namespace streaming {
         std::mutex webcamMutex;
 
         void ScreenWorker(int durationSec, std::string taskId, ResultCallback callback) {
-<<<<<<< HEAD
             (void)taskId;
-=======
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
             auto startTime = std::chrono::steady_clock::now();
             int chunkId = 0;
 
@@ -52,10 +49,7 @@ namespace streaming {
         }
 
         void WebcamWorker(int durationSec, std::string taskId, ResultCallback callback) {
-<<<<<<< HEAD
             (void)taskId;
-=======
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
             auto startTime = std::chrono::steady_clock::now();
             int chunkId = 0;
             // Boundary for manual multipart if needed, but our protocol wraps it in base64 result

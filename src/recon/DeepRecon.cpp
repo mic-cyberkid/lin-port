@@ -56,7 +56,6 @@ namespace recon {
                     VARIANT vtProp;
                     hr = pclsObj->Get(prop.c_str(), 0, &vtProp, 0, 0);
                     if (SUCCEEDED(hr)) {
-<<<<<<< HEAD
                         std::wstring key_ws = prop;
                         std::string key_s(key_ws.begin(), key_ws.end());
 
@@ -67,23 +66,6 @@ namespace recon {
                         } else if (vtProp.vt == VT_I4) {
                             item[key_s] = vtProp.lVal;
                         } else if (vtProp.vt == VT_BOOL) {
-=======
-                        if (vtProp.vt == VT_BSTR) {
-                            item[nlohmann::json::to_string(nlohmann::json(std::wstring(vtProp.bstrVal)))] = std::wstring(vtProp.bstrVal); // This is a bit hacky for key conversion but works for ASCII
-                            // Cleaner:
-                            std::wstring ws(vtProp.bstrVal);
-                            std::string s(ws.begin(), ws.end());
-                            std::wstring key_ws = prop;
-                            std::string key_s(key_ws.begin(), key_ws.end());
-                            item[key_s] = s;
-                        } else if (vtProp.vt == VT_I4) {
-                            std::wstring key_ws = prop;
-                            std::string key_s(key_ws.begin(), key_ws.end());
-                            item[key_s] = vtProp.lVal;
-                        } else if (vtProp.vt == VT_BOOL) {
-                            std::wstring key_ws = prop;
-                            std::string key_s(key_ws.begin(), key_ws.end());
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
                             item[key_s] = (bool)vtProp.boolVal;
                         }
                         VariantClear(&vtProp);

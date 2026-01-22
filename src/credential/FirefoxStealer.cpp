@@ -1,11 +1,7 @@
 #include "FirefoxStealer.h"
 #include "../crypto/Base64.h"
 #include "../external/nlohmann/json.hpp"
-<<<<<<< HEAD
 #include "../external/sqlite3/sqlite3.h"
-=======
-#include "../external/sqlite/sqlite3.h"
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
 
 #include <windows.h>
 #include <shlobj.h>

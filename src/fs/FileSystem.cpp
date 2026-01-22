@@ -30,13 +30,9 @@ namespace fs {
                 std::time_t tt = std::chrono::system_clock::to_time_t(sctp);
                 
                 std::stringstream ss;
-<<<<<<< HEAD
                 std::tm gmt;
                 gmtime_s(&gmt, &tt);
                 ss << std::put_time(&gmt, "%Y-%m-%dT%H:%M:%SZ");
-=======
-                ss << std::put_time(std::gmtime(&tt), "%Y-%m-%dT%H:%M:%SZ");
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
                 item["modified"] = ss.str();
 
                 results.push_back(item);

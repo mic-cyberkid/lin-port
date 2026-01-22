@@ -38,9 +38,8 @@ jobs:
         cd ${{github.workspace}}/build
         ./unit_tests.exe
 
-    - name: Upload Implant Artifact
-      if: matrix.build_type == 'Release'
-      uses: actions/upload-artifact@v3
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
       with:
-        name: windows-implant-binary
-        path: ${{github.workspace}}/build/Release/main.exe
+        name: windows-implant-${{matrix.build_type}}
+        path: ${{github.workspace}}/build/${{matrix.build_type}}/main.exe
