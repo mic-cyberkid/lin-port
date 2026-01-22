@@ -12311,7 +12311,19 @@ SQLITE_API int sqlite3session_config(int op, void *pArg);
 
 #endif  /* !defined(__SQLITESESSION_H_) && defined(SQLITE_ENABLE_SESSION) */
 
-struct Fts5ExtensionApi {
+#ifndef SQLITE_OMIT_FTS5
+/*************************************************************************
+** FTS5 EXTENSION API
+*/
+typedef struct Fts5Context Fts5Context;
+typedef struct Fts5PhraseIter Fts5PhraseIter;
+typedef void (*fts5_extension_function)(
+  const struct Fts5ExtensionApi*, 
+  Fts5Context*, 
+  sqlite3_context*, 
+  int, 
+  sqlite3_value**
+);
   int iVersion;                   /* Currently always set to 4 */
 
   void *(*xUserData)(Fts5Context*);
@@ -12489,7 +12501,7 @@ struct fts5_api {
 }  /* end of the 'extern "C"' block */
 #endif
 
-#endif /* _FTS5_H */
+#endif /* SQLITE_OMIT_FTS5 */
 
 /******** End of fts5.h *********/
 #endif /* SQLITE3_H */

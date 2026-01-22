@@ -38,11 +38,7 @@ bool Unhooker::RefreshNtdll() {
     PIMAGE_NT_HEADERS memNtHeaders = (PIMAGE_NT_HEADERS)((BYTE*)hNtdll + memDosHeader->e_lfanew);
     (void)memNtHeaders;
     (void)fileSize;
-    // The original code had (void)memNtHeaders; and (void)fileSize;
-    // The instruction was to fix unreferenced variables.
-    // Since memNtHeaders is not used, it can be removed or kept with (void) cast.
-    // The provided patch snippet was malformed here, so I'm keeping the original (void) casts for variables that are not used.
-    (void)memNtHeaders;
+    if (memNtHeaders->OptionalHeader.SizeOfCode == 0) return false;
     (void)fileSize;
 
     // Find the .text section

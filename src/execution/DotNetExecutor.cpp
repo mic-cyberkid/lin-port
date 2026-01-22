@@ -11,7 +11,9 @@
 #import "libid:BED7F4EA-1A96-11D2-8F08-00A0C9A6186D" \
     rename("SizeOf", "SizeOf_") \
     rename("ReportEvent", "ReportEvent_") \
-    rename("or", "or_")
+    rename("or", "or_") \
+    rename("and", "and_") \
+    rename("not", "not_")
 
 using namespace mscorlib;
 
@@ -86,8 +88,6 @@ std::string DotNetExecutor::Execute(const std::vector<uint8_t>& assemblyBytes, c
         SafeArrayDestroy(pSafeArray);
         return "Error: Failed to load assembly into AppDomain.";
     }
-    _AssemblyPtr pAssemblyPtr(pAssembly, false); // Wrap in smart pointer to ensure release
-
     _MethodInfoPtr pEntryPoint = nullptr;
     hr = pAssembly->get_EntryPoint(&pEntryPoint);
     if (FAILED(hr)) {
