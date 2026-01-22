@@ -12,8 +12,8 @@ if(MSVC)
         $<$<COMPILE_LANGUAGE:CXX,C>:/GS->             # Disable buffer security check
         $<$<COMPILE_LANGUAGE:CXX,C>:/EHsc>            # Enable exception handling
     )
-    # Prevent min/max macros
-    add_compile_definitions(NOMINMAX)
+    # Prevent min/max macros and disable heavy SQLite features
+    add_compile_definitions(NOMINMAX SQLITE_OMIT_FTS5)
     add_link_options(
         /LTCG            # Link Time Code Generation
         /OPT:REF         # Remove unused functions

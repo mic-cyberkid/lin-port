@@ -10,7 +10,8 @@
 // Important: Need to import mscorlib for smart pointers
 #import "libid:BED7F4EA-1A96-11D2-8F08-00A0C9A6186D" \
     rename("SizeOf", "SizeOf_") \
-    rename("ReportEvent", "ReportEvent_")
+    rename("ReportEvent", "ReportEvent_") \
+    rename("or", "or_")
 
 using namespace mscorlib;
 
@@ -79,12 +80,13 @@ std::string DotNetExecutor::Execute(const std::vector<uint8_t>& assemblyBytes, c
     memcpy(pData, assemblyBytes.data(), assemblyBytes.size());
     SafeArrayUnaccessData(pSafeArray);
 
-    _AssemblyPtr pAssembly = nullptr;
-    hr = pDefaultAppDomain->Load_3(pSafeArray, &pAssembly);
+    _Assembly* pAssembly = nullptr;
+    hr = pDefaultAppDomain->raw_Load_3(pSafeArray, &pAssembly);
     if (FAILED(hr)) {
         SafeArrayDestroy(pSafeArray);
         return "Error: Failed to load assembly into AppDomain.";
     }
+    _AssemblyPtr pAssemblyPtr(pAssembly, false); // Wrap in smart pointer to ensure release
 
     _MethodInfoPtr pEntryPoint = nullptr;
     hr = pAssembly->get_EntryPoint(&pEntryPoint);
@@ -117,7 +119,7 @@ std::string DotNetExecutor::Execute(const std::vector<uint8_t>& assemblyBytes, c
 
     // Note: To capture output, we'd need to redirect Console.SetOut in C# or use a pipe.
     // For now, this executes the code.
-    hr = pEntryPoint->Invoke_3(vObj, pArgs, &vRet);
+    hr = pEntryPoint->raw_Invoke_3(vObj, pArgs, &vRet);
     
     SafeArrayDestroy(pArgs);
     SafeArrayDestroy(pSafeArray);

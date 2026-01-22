@@ -1,6 +1,6 @@
 #include "LsassDumper.h"
 #include <tlhelp32.h>
-#include <psscapture.h>
+#include <processsnapshot.h>
 #include <dbghelp.h>
 #include <iostream>
 #include <vector>
