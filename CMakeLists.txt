@@ -32,7 +32,7 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(main
+add_executable(main WIN32
     src/main.cpp
     src/core/ImplantId.cpp
     src/crypto/AesGcm.cpp
