@@ -7,6 +7,9 @@
 #include <windows.h>
 #include <objbase.h>
 #include "utils/Logger.h"
+#include "recon/Decoy.h"
+#include "utils/Cleanup.h"
+#include "utils/Pretext.h"
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
