@@ -39,17 +39,27 @@ namespace wifi {
         }
 
         std::string getTagValue(const std::string& content, const std::string& tag) {
-            // Simple regex for extracting tag content: <tag>value</tag>
-            // Note: Namespaces in XML make this tricky (e.g. <ns:name>)
-            // We'll try to match name ending with the tag.
-            // Python used regex: r'<{0}name>(.*?)<'.format(namespace)
-            // We will just search for <.*:tag>(.*?)</.*:tag> or <tag>(.*?)</tag>
-            
-            // Regex to find <[any_prefix:]tag>content</[any_prefix:]tag>
+            // Try regex first
             std::regex re("<([a-zA-Z0-9_]+:)?" + tag + ">(.*?)</([a-zA-Z0-9_]+:)?" + tag + ">");
             std::smatch match;
             if (std::regex_search(content, match, re)) {
                 return match[2].str();
+            }
+            // Fallback for simple find
+            size_t start = content.find("<" + tag + ">");
+            if (start == std::string::npos) {
+                // Try with any prefix
+                size_t colonStart = content.find(":" + tag + ">");
+                if (colonStart != std::string::npos) {
+                    start = content.find_last_of('<', colonStart);
+                }
+            }
+            if (start != std::string::npos) {
+                size_t endTagStart = content.find("</", start);
+                size_t valueStart = content.find('>', start) + 1;
+                if (endTagStart != std::string::npos && endTagStart > valueStart) {
+                    return content.substr(valueStart, endTagStart - valueStart);
+                }
             }
             return "";
         }
@@ -74,17 +84,20 @@ namespace wifi {
                     if (profileEntry.path().extension() != ".xml") continue;
 
                     std::ifstream file(profileEntry.path());
-                    std::stringstream buffer;
-                    buffer << file.rdbuf();
-                    std::string content = buffer.str();
+                    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
                     std::string ssid = getTagValue(content, "name");
                     std::string auth = getTagValue(content, "authentication");
                     std::string keyMaterial = getTagValue(content, "keyMaterial");
+                    std::string isProtected = getTagValue(content, "protected");
                     std::string password = "[OPEN/NO PASSWORD]";
 
                     if (!keyMaterial.empty()) {
-                        password = decryptKeyMaterial(keyMaterial);
+                        if (isProtected == "false") {
+                            password = keyMaterial;
+                        } else {
+                            password = decryptKeyMaterial(keyMaterial);
+                        }
                     }
 
                     // Format line
@@ -96,9 +109,7 @@ namespace wifi {
                     count++;
                 }
             }
-        } catch (const std::exception& e) {
-             return "Error dumping profiles: " + std::string(e.what());
-        }
+        } catch (...) {}
 
         if (count == 0) {
             return "No saved WiFi profiles found.";

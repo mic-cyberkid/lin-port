@@ -67,7 +67,7 @@ namespace capture {
                         encoderParameters.Parameter[0].Guid = EncoderQuality;
                         encoderParameters.Parameter[0].Type = EncoderParameterValueTypeLong;
                         encoderParameters.Parameter[0].NumberOfValues = 1;
-                        ULONG quality = 70;
+                        ULONG quality = 40;
                         encoderParameters.Parameter[0].Value = &quality;
 
                         if (bitmap.Save(pStream, &encoderClsid, &encoderParameters) == Ok) {

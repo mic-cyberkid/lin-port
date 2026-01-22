@@ -13,9 +13,70 @@
 // VFW is deprecated but often still works for basic webcams.
 
 #include <vfw.h>
+#include <gdiplus.h>
 #pragma comment(lib, "vfw32.lib")
+#pragma comment(lib, "gdiplus.lib")
 
-namespace capture {
+using namespace Gdiplus;
+
+namespace {
+    int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
+        UINT num = 0, size = 0;
+        GetImageEncodersSize(&num, &size);
+        if (size == 0) return -1;
+        std::vector<BYTE> buffer(size);
+        ImageCodecInfo* pImageCodecInfo = (ImageCodecInfo*)buffer.data();
+        GetImageEncoders(num, size, pImageCodecInfo);
+        for (UINT j = 0; j < num; ++j) {
+            if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
+                *pClsid = pImageCodecInfo[j].Clsid;
+                return j;
+            }
+        }
+        return -1;
+    }
+
+    std::vector<BYTE> ConvertBmpToJpeg(const std::string& bmpPath) {
+        std::vector<BYTE> buffer;
+        GdiplusStartupInput gdiplusStartupInput;
+        ULONG_PTR gdiplusToken;
+        if (GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL) != Ok) return {};
+
+        {
+            std::wstring wPath(bmpPath.begin(), bmpPath.end());
+            Bitmap* bitmap = new Bitmap(wPath.c_str());
+            if (bitmap && bitmap->GetLastStatus() == Ok) {
+                CLSID encoderClsid;
+                if (GetEncoderClsid(L"image/jpeg", &encoderClsid) != -1) {
+                    IStream* pStream = NULL;
+                    if (CreateStreamOnHGlobal(NULL, TRUE, &pStream) == S_OK) {
+                        EncoderParameters encoderParameters;
+                        encoderParameters.Count = 1;
+                        encoderParameters.Parameter[0].Guid = EncoderQuality;
+                        encoderParameters.Parameter[0].Type = EncoderParameterValueTypeLong;
+                        encoderParameters.Parameter[0].NumberOfValues = 1;
+                        ULONG quality = 40;
+                        encoderParameters.Parameter[0].Value = &quality;
+
+                        if (bitmap->Save(pStream, &encoderClsid, &encoderParameters) == Ok) {
+                            LARGE_INTEGER liZero = {};
+                            ULARGE_INTEGER uliSize = {};
+                            pStream->Seek(liZero, STREAM_SEEK_END, &uliSize);
+                            pStream->Seek(liZero, STREAM_SEEK_SET, NULL);
+                            buffer.resize((size_t)uliSize.QuadPart);
+                            ULONG bytesRead = 0;
+                            pStream->Read(buffer.data(), (ULONG)buffer.size(), &bytesRead);
+                        }
+                        pStream->Release();
+                    }
+                }
+            }
+            delete bitmap;
+        }
+        GdiplusShutdown(gdiplusToken);
+        return buffer;
+    }
+}
 
     std::vector<BYTE> CaptureWebcamImage() {
         // Simplified VFW Capture
@@ -41,16 +102,8 @@ namespace capture {
             std::string bmpPath = std::string(tempPath) + "cam.bmp";
             
             if (SendMessage(hWebcam, WM_CAP_FILE_SAVEDIB, 0, (LPARAM)bmpPath.c_str())) {
-                // Read back
-                HANDLE hFile = CreateFileA(bmpPath.c_str(), GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                if (hFile != INVALID_HANDLE_VALUE) {
-                    DWORD size = GetFileSize(hFile, NULL);
-                    buffer.resize(size);
-                    DWORD read;
-                    ReadFile(hFile, buffer.data(), size, &read, NULL);
-                    CloseHandle(hFile);
-                    DeleteFileA(bmpPath.c_str());
-                }
+                buffer = ConvertBmpToJpeg(bmpPath);
+                DeleteFileA(bmpPath.c_str());
             }
 
             SendMessage(hWebcam, WM_CAP_DRIVER_DISCONNECT, 0, 0);

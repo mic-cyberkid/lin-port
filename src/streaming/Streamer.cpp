@@ -110,7 +110,8 @@ namespace streaming {
 
     void StopScreenStream() {
         screenStreamActive = false;
-        // Thread will exit on next loop
+        std::lock_guard<std::mutex> lock(screenMutex);
+        // Worker will exit
     }
 
     void StartWebcamStream(int durationSec, const std::string& taskId, ResultCallback callback) {
@@ -123,6 +124,7 @@ namespace streaming {
 
     void StopWebcamStream() {
         webcamStreamActive = false;
+        std::lock_guard<std::mutex> lock(webcamMutex);
     }
 
 }
