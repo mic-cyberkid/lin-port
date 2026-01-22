@@ -46,6 +46,8 @@ add_executable(main WIN32
     src/recon/SysInfo.cpp
     src/recon/InstalledSoftware.cpp
     src/persistence/Persistence.cpp
+    src/decoy/Pretext.cpp
+    src/utils/Cleanup.cpp
     src/wifi/WifiDumper.cpp
     src/utils/Exec.cpp
     src/recon/Decoy.cpp
