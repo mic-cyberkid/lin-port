@@ -5,37 +5,16 @@
 #include <fstream>
 #include "../evasion/Syscalls.h"
 
+#include "Shared.h"
+#include <fstream>
+#include "../evasion/Syscalls.h"
+
 namespace {
 std::string WideToMultiByte(const std::wstring& wstr) {
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
     std::string strTo(size_needed, 0);
     WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
     return strTo;
-}
-
-// djb2 hash impl
-DWORD djb2Hash(const char* str) {
-    DWORD hash = 5381;
-    int c;
-    while ((c = *str++)) hash = ((hash << 5) + hash) + c;
-    return hash;
-}
-
-// getProcByHash (scan export table)
-PVOID getProcByHash(HMODULE mod, DWORD targetHash) {
-    PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)mod;
-    PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((BYTE*)mod + dosHeader->e_lfanew);
-    PIMAGE_EXPORT_DIRECTORY exportDir = (PIMAGE_EXPORT_DIRECTORY)((BYTE*)mod + ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
-    DWORD* names = (DWORD*)((BYTE*)mod + exportDir->AddressOfNames);
-    WORD* ordinals = (WORD*)((BYTE*)mod + exportDir->AddressOfNameOrdinals);
-    DWORD* funcs = (DWORD*)((BYTE*)mod + exportDir->AddressOfFunctions);
-
-    for (DWORD i = 0; i < exportDir->NumberOfNames; i++) {
-        if (djb2Hash((char*)mod + names[i]) == targetHash) {
-            return (PVOID)((BYTE*)mod + funcs[ordinals[i]]);
-        }
-    }
-    return NULL;
 }
 }
 

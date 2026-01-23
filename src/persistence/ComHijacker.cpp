@@ -70,6 +70,7 @@ bool ComHijacker::Install(const std::string& implantPath, const std::string& cls
 }
 
 bool ComHijacker::Uninstall(const std::string& /*clsid*/) {
+    // TODO: Implement the uninstall logic.
     // Syscall for NtDeleteKey is more complex. Stubbing for now.
     return true;
 }

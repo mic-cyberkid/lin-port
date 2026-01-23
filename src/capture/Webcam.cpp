@@ -277,8 +277,6 @@ std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint
             std::string hintLower = nameHint;
             std::transform(hintLower.begin(), hintLower.end(), hintLower.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
-            
-
             for (UINT32 i = 0; i < deviceCount; ++i) {
                 WCHAR* wszName = nullptr;
                 UINT32 cch = 0;
@@ -288,7 +286,8 @@ std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint
                     std::string utf8(utf8Len, 0);
                     WideCharToMultiByte(CP_UTF8, 0, &wname[0], (int)wname.size(), &utf8[0], utf8Len, NULL, NULL);
                     std::string lowerUtf8 = utf8;
-                    std::transform(hintLower.begin(), hintLower.end(), hintLower.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+                    std::transform(lowerUtf8.begin(), lowerUtf8.end(), lowerUtf8.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+
                     if (lowerUtf8.find(hintLower) != std::string::npos) {
                         selectedIdx = static_cast<int>(i);
                         CoTaskMemFree(wszName);
@@ -303,47 +302,73 @@ std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint
             LOG_ERR("No matching device for hint '" + nameHint + "' or invalid index");
         } else {
             hr = ppDevices[selectedIdx]->ActivateObject(IID_PPV_ARGS(&pSource));
+            if (FAILED(hr)) LOG_ERR("Failed to activate device: " + std::to_string(hr));
+
             if (SUCCEEDED(hr)) {
                 hr = pSource->CreatePresentationDescriptor(&pPD);
+                if (FAILED(hr)) LOG_ERR("Failed to create presentation descriptor: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 BOOL fSelected;
                 hr = pPD->GetStreamDescriptorByIndex(0, &fSelected, &pSD);
+                if (FAILED(hr)) LOG_ERR("Failed to get stream descriptor: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 hr = pSD->GetMediaTypeHandler(&pHandler);
+                if (FAILED(hr)) LOG_ERR("Failed to get media type handler: " + std::to_string(hr));
             }
+
             if (SUCCEEDED(hr)) {
-                hr = MFCreateMediaType(&pType);
-            }
-            if (SUCCEEDED(hr)) {
-                pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-                pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_MJPG);
-                pType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-                MFSetAttributeSize(pType, MF_MT_FRAME_SIZE, 320, 240);
-                MFSetAttributeRatio(pType, MF_MT_FRAME_RATE, 30, 1);
-                MFSetAttributeRatio(pType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-                hr = pHandler->SetCurrentMediaType(pType);
-                if (FAILED(hr)) {
-                    pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-                    hr = pHandler->SetCurrentMediaType(pType);
+                DWORD mediaTypeCount = 0;
+                hr = pHandler->GetMediaTypeCount(&mediaTypeCount);
+                if (SUCCEEDED(hr)) {
+                    IMFMediaType* bestType = nullptr;
+                    for (DWORD i = 0; i < mediaTypeCount; i++) {
+                        IMFMediaType* pMediaType = nullptr;
+                        hr = pHandler->GetMediaTypeByIndex(i, &pMediaType);
+                        if (SUCCEEDED(hr)) {
+                            GUID subtype;
+                            pMediaType->GetGUID(MF_MT_SUBTYPE, &subtype);
+                            if (subtype == MFVideoFormat_MJPG) {
+                                bestType = pMediaType;
+                                break;
+                            }
+                            if (i == 0 && !bestType) {
+                                bestType = pMediaType;
+                                bestType->AddRef();
+                            }
+                            pMediaType->Release();
+                        }
+                    }
+                    if (bestType) {
+                        hr = pHandler->SetCurrentMediaType(bestType);
+                        if (FAILED(hr)) LOG_ERR("Failed to set best media type: " + std::to_string(hr));
+                        pType = bestType;
+                    } else {
+                        hr = E_FAIL;
+                    }
                 }
             }
             if (SUCCEEDED(hr)) {
                 hr = pPD->SelectStream(0);
+                if (FAILED(hr)) LOG_ERR("Failed to select stream: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 pCallback = new SampleGrabberCallback();
                 hr = MFCreateSampleGrabberSinkActivate(pType, pCallback, &pGrabberAct);
+                if (FAILED(hr)) LOG_ERR("Failed to create sample grabber: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 hr = pGrabberAct->ActivateObject(IID_PPV_ARGS(&pSink));
+                if (FAILED(hr)) LOG_ERR("Failed to activate sample grabber: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 hr = MFCreateTopology(&pTopology);
+                if (FAILED(hr)) LOG_ERR("Failed to create topology: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 hr = MFCreateTopologyNode(MF_TOPOLOGY_SOURCESTREAM_NODE, &pSourceNode);
+                if (FAILED(hr)) LOG_ERR("Failed to create source node: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 pSourceNode->SetUnknown(MF_TOPONODE_SOURCE, pSource);
@@ -351,22 +376,27 @@ std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint
                 pSourceNode->SetUnknown(MF_TOPONODE_STREAM_DESCRIPTOR, pSD);
                 pTopology->AddNode(pSourceNode);
                 hr = MFCreateTopologyNode(MF_TOPOLOGY_OUTPUT_NODE, &pSinkNode);
+                if (FAILED(hr)) LOG_ERR("Failed to create sink node: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 pSinkNode->SetObject(pSink);
                 pTopology->AddNode(pSinkNode);
                 hr = pSourceNode->ConnectOutput(0, pSinkNode, 0);
+                if (FAILED(hr)) LOG_ERR("Failed to connect nodes: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 hr = MFCreateMediaSession(NULL, &pSession);
+                if (FAILED(hr)) LOG_ERR("Failed to create media session: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 hr = pSession->SetTopology(0, pTopology);
+                if (FAILED(hr)) LOG_ERR("Failed to set topology: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 PROPVARIANT varStart;
                 PropVariantInit(&varStart);
                 hr = pSession->Start(&GUID_NULL, &varStart);
+                if (FAILED(hr)) LOG_ERR("Failed to start session: " + std::to_string(hr));
             }
             if (SUCCEEDED(hr)) {
                 hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);

