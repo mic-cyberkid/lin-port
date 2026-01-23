@@ -40,18 +40,18 @@ namespace {
             return count;
         }
 
-        STDMETHODIMP OnClockStart(MFTIME hnsSystemTime, LONGLONG llClockStartOffset) { return S_OK; }
-        STDMETHODIMP OnClockStop(MFTIME hnsSystemTime) { return S_OK; }
-        STDMETHODIMP OnClockPause(MFTIME hnsSystemTime) { return S_OK; }
-        STDMETHODIMP OnClockResume(MFTIME hnsSystemTime) { return S_OK; }
-        STDMETHODIMP OnClockSetRate(MFTIME hnsSystemTime, float flRate) { return S_OK; }
-        STDMETHODIMP OnClockRestart(MFTIME hnsSystemTime) { return S_OK; }
-        STDMETHODIMP OnSetPresentationClock(IMFPresentationClock* pPresentationClock) { return S_OK; }
+        STDMETHODIMP OnClockStart(MFTIME /*hnsSystemTime*/, LONGLONG /*llClockStartOffset*/) { return S_OK; }
+        STDMETHODIMP OnClockStop(MFTIME /*hnsSystemTime*/) { return S_OK; }
+        STDMETHODIMP OnClockPause(MFTIME /*hnsSystemTime*/) { return S_OK; }
+        STDMETHODIMP OnClockResume(MFTIME /*hnsSystemTime*/) { return S_OK; }
+        STDMETHODIMP OnClockSetRate(MFTIME /*hnsSystemTime*/, float /*flRate*/) { return S_OK; }
+        STDMETHODIMP OnClockRestart(MFTIME /*hnsSystemTime*/) { return S_OK; }
+        STDMETHODIMP OnSetPresentationClock(IMFPresentationClock* /*pPresentationClock*/) { return S_OK; }
         STDMETHODIMP OnProcessSample(REFGUID guidMajorMediaType, DWORD dwSampleFlags, LONGLONG llSampleTime, LONGLONG llSampleDuration, const BYTE * pSampleBuffer, DWORD dwSampleSize) {
             std::lock_guard<std::mutex> lock(mutex_);
             bufferLen_ = dwSampleSize;
-            buffer_ = new BYTE[cbBuffer];
-            memcpy(buffer_, pBuffer, cbBuffer);
+            buffer_ = new BYTE[dwSampleSize];
+            memcpy(buffer_, pSampleBuffer, dwSampleSize);
             SetEvent(event_);
             return S_OK;
         }
