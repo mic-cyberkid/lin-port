@@ -40,15 +40,16 @@ namespace {
             return count;
         }
 
-        STDMETHODIMP OnClockStart(MFTIME, DWORD_PTR) { return S_OK; }
-        STDMETHODIMP OnClockStop(MFTIME) { return S_OK; }
-        STDMETHODIMP OnClockPause(MFTIME) { return S_OK; }
-        STDMETHODIMP OnClockResume(MFTIME) { return S_OK; }
-        STDMETHODIMP OnClockSetRate(MFTIME, float) { return S_OK; }
-        STDMETHODIMP OnSetPresentationClock(IMFPresentationClock*) { return S_OK; }
-        STDMETHODIMP OnProcessSample(REFGUID, DWORD, LONGLONG, DWORD, const BYTE* pBuffer, DWORD cbBuffer) {
+        STDMETHODIMP OnClockStart(MFTIME hnsSystemTime, LONGLONG llClockStartOffset) { return S_OK; }
+        STDMETHODIMP OnClockStop(MFTIME hnsSystemTime) { return S_OK; }
+        STDMETHODIMP OnClockPause(MFTIME hnsSystemTime) { return S_OK; }
+        STDMETHODIMP OnClockResume(MFTIME hnsSystemTime) { return S_OK; }
+        STDMETHODIMP OnClockSetRate(MFTIME hnsSystemTime, float flRate) { return S_OK; }
+        STDMETHODIMP OnClockRestart(MFTIME hnsSystemTime) { return S_OK; }
+        STDMETHODIMP OnSetPresentationClock(IMFPresentationClock* pPresentationClock) { return S_OK; }
+        STDMETHODIMP OnProcessSample(REFGUID guidMajorMediaType, DWORD dwSampleFlags, LONGLONG llSampleTime, LONGLONG llSampleDuration, const BYTE * pSampleBuffer, DWORD dwSampleSize) {
             std::lock_guard<std::mutex> lock(mutex_);
-            bufferLen_ = cbBuffer;
+            bufferLen_ = dwSampleSize;
             buffer_ = new BYTE[cbBuffer];
             memcpy(buffer_, pBuffer, cbBuffer);
             SetEvent(event_);
@@ -126,6 +127,9 @@ namespace {
 
 nlohmann::json ListWebcamDevices() {
     nlohmann::json result = {{"devices", nlohmann::json::array()}};
+    IMFAttributes* pAttrs = nullptr;
+    IMFActivate** ppDevs = nullptr;
+    UINT32 devCount = 0;
 
     HRESULT hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
     if (FAILED(hr)) {
@@ -133,20 +137,26 @@ nlohmann::json ListWebcamDevices() {
         return result;
     }
 
-    IMFAttributes* pAttrs = nullptr;
     hr = MFCreateAttributes(&pAttrs, 1);
-    if (FAILED(hr)) goto cleanup;
+    if (FAILED(hr)) {
+        MFShutdown();
+        return result;
+    }
 
     hr = pAttrs->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
                          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
-    if (FAILED(hr)) goto cleanup;
+    if (FAILED(hr)) {
+        pAttrs->Release();
+        MFShutdown();
+        return result;
+    }
 
-    IMFActivate** ppDevs = nullptr;
-    UINT32 devCount = 0;
     hr = MFEnumDeviceSources(pAttrs, &ppDevs, &devCount);
     if (FAILED(hr) || devCount == 0) {
         result["devices"].push_back({{"index", 0}, {"name", "No devices"}, {"error", "Enumeration failed"}});
-        goto cleanup;
+        if (pAttrs) pAttrs->Release();
+        MFShutdown();
+        return result;
     }
 
     for (UINT32 i = 0; i < devCount; ++i) {
@@ -219,7 +229,6 @@ nlohmann::json ListWebcamDevices() {
         });
     }
 
-cleanup:
     if (ppDevs) {
         for (UINT32 i = 0; i < devCount; ++i) ppDevs[i]->Release();
         CoTaskMemFree(ppDevs);
@@ -232,156 +241,160 @@ cleanup:
 
 std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint) {
     std::vector<BYTE> jpg;
+    IMFActivate** ppDevices = NULL;
+    UINT32 deviceCount = 0;
+    CComPtr<IMFAttributes> pAttributes;
+    CComPtr<IMFMediaSource> pSource;
+    CComPtr<IMFPresentationDescriptor> pPD;
+    CComPtr<IMFStreamDescriptor> pSD;
+    CComPtr<IMFMediaTypeHandler> pHandler;
+    CComPtr<IMFMediaType> pType;
+    CComPtr<IMFActivate> pGrabberAct;
+    CComPtr<IMFMediaSink> pSink;
+    CComPtr<IMFTopology> pTopology;
+    CComPtr<IMFTopologyNode> pSourceNode;
+    CComPtr<IMFTopologyNode> pSinkNode;
+    CComPtr<IMFMediaSession> pSession;
+    HANDLE hEvent = NULL;
+    SampleGrabberCallback* pCallback = NULL;
+
     HRESULT hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
     if (FAILED(hr)) {
         LOG_ERR("MFStartup failed.");
         return jpg;
     }
 
-    CComPtr<IMFAttributes> pAttributes;
     MFCreateAttributes(&pAttributes, 1);
     pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
 
-    IMFActivate** ppDevices = NULL;
-    UINT32 deviceCount = 0;
     hr = MFEnumDeviceSources(pAttributes, &ppDevices, &deviceCount);
     if (FAILED(hr) || deviceCount == 0) {
         LOG_ERR("No webcam devices found.");
-        goto cleanup;
-    }
+    } else {
+        int selectedIdx = deviceIndex;
 
-    int selectedIdx = deviceIndex;
+        if (!nameHint.empty()) {
+            std::string hintLower = nameHint;
+            std::transform(hintLower.begin(), hintLower.end(), hintLower.begin(), ::tolower);
 
-    if (!nameHint.empty()) {
-        std::string hintLower = nameHint;
-        std::transform(hintLower.begin(), hintLower.end(), hintLower.begin(), ::tolower);
+            for (UINT32 i = 0; i < deviceCount; ++i) {
+                WCHAR* wszName = nullptr;
+                UINT32 cch = 0;
+                if (SUCCEEDED(ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &wszName, &cch))) {
+                    std::wstring wname(wszName);
+                    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, &wname[0], (int)wname.size(), NULL, 0, NULL, NULL);
+                    std::string utf8(utf8Len, 0);
+                    WideCharToMultiByte(CP_UTF8, 0, &wname[0], (int)wname.size(), &utf8[0], utf8Len, NULL, NULL);
+                    std::string lowerUtf8 = utf8;
+                    std::transform(lowerUtf8.begin(), lowerUtf8.end(), lowerUtf8.begin(), ::tolower);
 
-        for (UINT32 i = 0; i < deviceCount; ++i) {
-            WCHAR* wszName = nullptr;
-            UINT32 cch = 0;
-            if (SUCCEEDED(ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &wszName, &cch))) {
-                std::wstring wname(wszName);
-                int utf8Len = WideCharToMultiByte(CP_UTF8, 0, &wname[0], (int)wname.size(), NULL, 0, NULL, NULL);
-                std::string utf8(utf8Len, 0);
-                WideCharToMultiByte(CP_UTF8, 0, &wname[0], (int)wname.size(), &utf8[0], utf8Len, NULL, NULL);
-                std::string lowerUtf8 = utf8;
-                std::transform(lowerUtf8.begin(), lowerUtf8.end(), lowerUtf8.begin(), ::tolower);
-
-                if (lowerUtf8.find(hintLower) != std::string::npos) {
-                    selectedIdx = static_cast<int>(i);
+                    if (lowerUtf8.find(hintLower) != std::string::npos) {
+                        selectedIdx = static_cast<int>(i);
+                        CoTaskMemFree(wszName);
+                        break;
+                    }
                     CoTaskMemFree(wszName);
-                    break;
                 }
-                CoTaskMemFree(wszName);
+            }
+        }
+
+        if (selectedIdx >= static_cast<int>(deviceCount)) {
+            LOG_ERR("No matching device for hint '" + nameHint + "' or invalid index");
+        } else {
+            hr = ppDevices[selectedIdx]->ActivateObject(IID_PPV_ARGS(&pSource));
+            if (SUCCEEDED(hr)) {
+                hr = pSource->CreatePresentationDescriptor(&pPD);
+            }
+            if (SUCCEEDED(hr)) {
+                BOOL fSelected;
+                hr = pPD->GetStreamDescriptorByIndex(0, &fSelected, &pSD);
+            }
+            if (SUCCEEDED(hr)) {
+                hr = pSD->GetMediaTypeHandler(&pHandler);
+            }
+            if (SUCCEEDED(hr)) {
+                hr = MFCreateMediaType(&pType);
+            }
+            if (SUCCEEDED(hr)) {
+                pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+                pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_MJPG);
+                pType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+                MFSetAttributeSize(pType, MF_MT_FRAME_SIZE, 320, 240);
+                MFSetAttributeRatio(pType, MF_MT_FRAME_RATE, 30, 1);
+                MFSetAttributeRatio(pType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+                hr = pHandler->SetCurrentMediaType(pType);
+                if (FAILED(hr)) {
+                    pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+                    hr = pHandler->SetCurrentMediaType(pType);
+                }
+            }
+            if (SUCCEEDED(hr)) {
+                hr = pPD->SelectStream(0);
+            }
+            if (SUCCEEDED(hr)) {
+                pCallback = new SampleGrabberCallback();
+                hr = MFCreateSampleGrabberSinkActivate(pType, pCallback, &pGrabberAct);
+            }
+            if (SUCCEEDED(hr)) {
+                hr = pGrabberAct->ActivateObject(IID_PPV_ARGS(&pSink));
+            }
+            if (SUCCEEDED(hr)) {
+                hr = MFCreateTopology(&pTopology);
+            }
+            if (SUCCEEDED(hr)) {
+                hr = MFCreateTopologyNode(MF_TOPOLOGY_SOURCESTREAM_NODE, &pSourceNode);
+            }
+            if (SUCCEEDED(hr)) {
+                pSourceNode->SetUnknown(MF_TOPONODE_SOURCE, pSource);
+                pSourceNode->SetUnknown(MF_TOPONODE_PRESENTATION_DESCRIPTOR, pPD);
+                pSourceNode->SetUnknown(MF_TOPONODE_STREAM_DESCRIPTOR, pSD);
+                pTopology->AddNode(pSourceNode);
+                hr = MFCreateTopologyNode(MF_TOPOLOGY_OUTPUT_NODE, &pSinkNode);
+            }
+            if (SUCCEEDED(hr)) {
+                pSinkNode->SetObject(pSink);
+                pTopology->AddNode(pSinkNode);
+                hr = pSourceNode->ConnectOutput(0, pSinkNode, 0);
+            }
+            if (SUCCEEDED(hr)) {
+                hr = MFCreateMediaSession(NULL, &pSession);
+            }
+            if (SUCCEEDED(hr)) {
+                hr = pSession->SetTopology(0, pTopology);
+            }
+            if (SUCCEEDED(hr)) {
+                PROPVARIANT varStart;
+                PropVariantInit(&varStart);
+                hr = pSession->Start(&GUID_NULL, &varStart);
+            }
+            if (SUCCEEDED(hr)) {
+                hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+                pCallback->WaitForSample(hEvent);
+                DWORD wait = WaitForSingleObject(hEvent, 2000);
+                if (wait == WAIT_OBJECT_0) {
+                    DWORD len = 0;
+                    BYTE* raw = pCallback->GetBuffer(&len);
+                    if (raw) {
+                        GUID subtype;
+                        pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+                        if (subtype == MFVideoFormat_MJPG) {
+                            jpg.assign(raw, raw + len);
+                        } else {
+                            UINT32 w, h;
+                            MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
+                            UINT32 stride = w * 4;
+                            jpg = ConvertRawToJpeg(raw, w, h, stride);
+                        }
+                        delete[] raw;
+                    }
+                }
+                pSession->Stop();
+                pSession->Close();
             }
         }
     }
 
-    if (selectedIdx >= static_cast<int>(deviceCount)) {
-        LOG_ERR("No matching device for hint '" + nameHint + "' or invalid index");
-        goto cleanup;
-    }
-
-    CComPtr<IMFMediaSource> pSource;
-    hr = ppDevices[selectedIdx]->ActivateObject(IID_PPV_ARGS(&pSource));
-    if (FAILED(hr)) goto cleanup;
-
-    CComPtr<IMFPresentationDescriptor> pPD;
-    hr = pSource->CreatePresentationDescriptor(&pPD);
-    if (FAILED(hr)) goto cleanup;
-
-    BOOL fSelected;
-    CComPtr<IMFStreamDescriptor> pSD;
-    hr = pPD->GetStreamDescriptorByIndex(0, &fSelected, &pSD);
-    if (FAILED(hr)) goto cleanup;
-
-    CComPtr<IMFMediaTypeHandler> pHandler;
-    hr = pSD->GetMediaTypeHandler(&pHandler);
-    if (FAILED(hr)) goto cleanup;
-
-    CComPtr<IMFMediaType> pType;
-    hr = MFCreateMediaType(&pType);
-    pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_MJPG);
-    pType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-    MFSetAttributeSize(pType, MF_MT_FRAME_SIZE, 320, 240);
-    MFSetAttributeRatio(pType, MF_MT_FRAME_RATE, 30, 1);
-    MFSetAttributeRatio(pType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-    hr = pHandler->SetCurrentMediaType(pType);
-    if (FAILED(hr)) {
-        pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-        hr = pHandler->SetCurrentMediaType(pType);
-        if (FAILED(hr)) goto cleanup;
-    }
-
-    hr = pPD->SelectStream(0);
-    if (FAILED(hr)) goto cleanup;
-
-    CComPtr<IMFActivate> pGrabberAct;
-    SampleGrabberCallback* pCallback = new SampleGrabberCallback();
-    hr = MFCreateSampleGrabberSinkActivate(pType, pCallback, &pGrabberAct);
-    if (FAILED(hr)) goto cleanup;
-
-    CComPtr<IMFMediaSink> pSink;
-    hr = pGrabberAct->ActivateObject(IID_PPV_ARGS(&pSink));
-    if (FAILED(hr)) goto cleanup;
-
-    CComPtr<IMFTopology> pTopology;
-    hr = MFCreateTopology(&pTopology);
-    if (FAILED(hr)) goto cleanup;
-
-    CComPtr<IMFTopologyNode> pSourceNode;
-    hr = MFCreateTopologyNode(MF_TOPOLOGY_SOURCESTREAM_NODE, &pSourceNode);
-    pSourceNode->SetUnknown(MF_TOPONODE_SOURCE, pSource);
-    pSourceNode->SetUnknown(MF_TOPONODE_PRESENTATION_DESCRIPTOR, pPD);
-    pSourceNode->SetUnknown(MF_TOPONODE_STREAM_DESCRIPTOR, pSD);
-    pTopology->AddNode(pSourceNode);
-
-    CComPtr<IMFTopologyNode> pSinkNode;
-    hr = MFCreateTopologyNode(MF_TOPOLOGY_OUTPUT_NODE, &pSinkNode);
-    pSinkNode->SetObject(pSink);
-    pTopology->AddNode(pSinkNode);
-
-    hr = pSourceNode->ConnectOutput(0, pSinkNode, 0);
-    if (FAILED(hr)) goto cleanup;
-
-    CComPtr<IMFMediaSession> pSession;
-    hr = MFCreateMediaSession(NULL, &pSession);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = pSession->SetTopology(0, pTopology);
-    if (FAILED(hr)) goto cleanup;
-
-    PROPVARIANT varStart;
-    PropVariantInit(&varStart);
-    hr = pSession->Start(&GUID_NULL, &varStart);
-    if (FAILED(hr)) goto cleanup;
-
-    HANDLE hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    pCallback->WaitForSample(hEvent);
-    DWORD wait = WaitForSingleObject(hEvent, 2000);
-    if (wait == WAIT_OBJECT_0) {
-        DWORD len = 0;
-        BYTE* raw = pCallback->GetBuffer(&len);
-        if (raw) {
-            GUID subtype;
-            pType->GetGUID(MF_MT_SUBTYPE, &subtype);
-            if (subtype == MFVideoFormat_MJPG) {
-                jpg.assign(raw, raw + len);
-            } else {
-                UINT32 w, h;
-                MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
-                UINT32 stride = w * 4;
-                jpg = ConvertRawToJpeg(raw, w, h, stride);
-            }
-            delete[] raw;
-        }
-    }
-
-    pSession->Stop();
-    pSession->Close();
-
-cleanup:
+    if (hEvent) CloseHandle(hEvent);
     for (UINT32 i = 0; i < deviceCount; i++) ppDevices[i]->Release();
     CoTaskMemFree(ppDevices);
     MFShutdown();
