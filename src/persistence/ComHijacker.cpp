@@ -1,6 +1,8 @@
 #include "ComHijacker.h"
 #include "../evasion/Syscalls.h"
 #include <iostream>
+#include <sddl.h>
+#pragma comment(lib, "advapi32.lib")
 
 #define NT_SUCCESS(status) (((NTSTATUS)(status)) >= 0)
 
