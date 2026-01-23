@@ -275,7 +275,9 @@ std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint
 
         if (!nameHint.empty()) {
             std::string hintLower = nameHint;
-            std::transform(hintLower.begin(), hintLower.end(), hintLower.begin(), [](unsigned char c){ return std::tolower(c); });
+            for (char& c : hintLower) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
 
             for (UINT32 i = 0; i < deviceCount; ++i) {
                 WCHAR* wszName = nullptr;
