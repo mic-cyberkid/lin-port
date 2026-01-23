@@ -288,7 +288,7 @@ std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint
                     std::string utf8(utf8Len, 0);
                     WideCharToMultiByte(CP_UTF8, 0, &wname[0], (int)wname.size(), &utf8[0], utf8Len, NULL, NULL);
                     std::string lowerUtf8 = utf8;
-                    std::transform(     lowerUtf8.begin(),      lowerUtf8.end(),      lowerUtf8.begin(),      [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); } );;
+                    std::transform(lowerUtf8.begin(), lowerUtf8.end(), lowerUtf8.begin(), ::tolower);
 
                     if (lowerUtf8.find(hintLower) != std::string::npos) {
                         selectedIdx = static_cast<int>(i);
