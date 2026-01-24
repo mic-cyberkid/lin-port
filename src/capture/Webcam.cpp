@@ -422,9 +422,6 @@ std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint
                 pSession->Stop();
                 pSession->Close();
             }
-                pSession->Stop();
-                pSession->Close();
-            }
         }
     }
 
