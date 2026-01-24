@@ -13,7 +13,7 @@ public:
     ~WinHttpClient();
 
     std::string get(const std::wstring& server, const std::wstring& path);
-    std::vector<BYTE> post(const std::wstring& server, const std::wstring& path, const std::vector<BYTE>& data);
+    std::vector<BYTE> post(const std::wstring& server, const std::wstring& path, const std::vector<BYTE>& data, const std::wstring& headers = L"");
 
 private:
     HINTERNET sessionHandle_ = nullptr;

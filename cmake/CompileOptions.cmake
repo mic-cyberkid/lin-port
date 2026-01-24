@@ -1,16 +1,30 @@
 # Set global compile options
 if(MSVC)
-    # Warning level 4, treat warnings as errors
-    add_compile_options(/W4 /WX)
-    # Enable security checks
-    add_compile_options(/GS)
-    # Enable exception handling
-    add_compile_options(/EHsc)
-    # Strict conformance
-    add_compile_options(/permissive-)
-    # Prevent min/max macros
-    add_compile_definitions(NOMINMAX)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:CXX,C>:/W4>              # Warning level 4
+        $<$<COMPILE_LANGUAGE:CXX,C>:/WX>              # Treat warnings as errors
+        $<$<CONFIG:Debug>:$<$<COMPILE_LANGUAGE:CXX,C>:/analyze>>         # Enable static analysis
+        $<$<CONFIG:Debug>:$<$<COMPILE_LANGUAGE:CXX,C>:/fsanitize=address>> # Enable AddressSanitizer
+        $<$<COMPILE_LANGUAGE:CXX,C>:/std:c++20>       # C++20 standard
+        $<$<COMPILE_LANGUAGE:CXX,C>:/permissive->     # Strict conformance
+        $<$<COMPILE_LANGUAGE:CXX,C>:/D_WIN32_WINNT=0x0601> # Target Windows 7 (or later)
+        $<$<COMPILE_LANGUAGE:CXX,C>:/Os>              # Favor size
+        $<$<COMPILE_LANGUAGE:CXX,C>:/GL>              # Whole Program Optimization
+        $<$<COMPILE_LANGUAGE:CXX,C>:/MT>              # Static runtime
+        $<$<COMPILE_LANGUAGE:CXX,C>:/GS->             # Disable buffer security check
+        $<$<COMPILE_LANGUAGE:CXX,C>:/EHsc>            # Enable exception handling
+        $<$<COMPILE_LANGUAGE:CXX,C>:/wd4996>          # Disable deprecation warnings (e.g. for SQLite)
+        /wd4996                                       # Force disable for all C/C++
+    )
+    # Prevent min/max macros, disable heavy SQLite features, and suppress CRT warnings
+    add_compile_definitions(NOMINMAX SQLITE_OMIT_FTS5 _CRT_SECURE_NO_WARNINGS)
+    add_link_options(
+        /LTCG            # Link Time Code Generation
+        /OPT:REF         # Remove unused functions
+        /OPT:ICF         # COMDAT folding
+        /NODEFAULTLIB:libcmtd.lib # Avoid debug runtime conflict if any
+    )
 else()
     # GCC/Clang
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX,C>:-Wall> $<$<COMPILE_LANGUAGE:CXX,C>:-Wextra> $<$<COMPILE_LANGUAGE:CXX,C>:-Wpedantic> $<$<COMPILE_LANGUAGE:CXX,C>:-Werror>)
 endif()

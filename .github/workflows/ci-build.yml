@@ -8,35 +8,38 @@ on:
 
 jobs:
   build:
+    name: Build and Test (${{ matrix.build_type }})
     runs-on: windows-latest
     strategy:
       matrix:
-        build_type: [Debug, Release]
+        build_type: [Release]
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Download and extract SQLite
-      shell: pwsh
-      run: |
-        $sqliteUrl = "https://www.sqlite.org/2026/sqlite-amalgamation-3510200.zip"
-        $zipPath = "$env:GITHUB_WORKSPACE\sqlite.zip"
-        $destPath = "$env:GITHUB_WORKSPACE\external\sqlite3"
-
-        New-Item -ItemType Directory -Force -Path $destPath | Out-Null
-        Invoke-WebRequest -Uri $sqliteUrl -OutFile $zipPath
-        Expand-Archive -Path $zipPath -DestinationPath $destPath -Force
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          build/_deps
+        key: ${{ runner.os }}-deps-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-deps-
 
     - name: Configure CMake
       run: cmake -B ${{ github.workspace }}/build -S ${{ github.workspace }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
-    - name: Build
-      run: cmake --build ${{ github.workspace }}/build --config ${{ matrix.build_type }}
+    - name: Build All
+      run: cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
 
-    - name: Display final build size
+    - name: Run Unit Tests
       shell: pwsh
       run: |
-        $buildDir = "$env:GITHUB_WORKSPACE\build"
-        $sizeBytes = (Get-ChildItem -Recurse -Force $buildDir | Measure-Object Length -Sum).Sum
-        $sizeMB = [Math]::Round($sizeBytes / 1MB, 2)
-        Write-Host "Final build size (${{ matrix.build_type }}): $sizeMB MB"
+        cd ${{github.workspace}}/build/${{matrix.build_type}}
+        ./unit_tests.exe
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-implant-${{matrix.build_type}}
+        path: ${{github.workspace}}/build/${{matrix.build_type}}/main.exe

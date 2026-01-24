@@ -24,6 +24,12 @@ enum class TaskType {
     SYSINFO,
     DEEP_RECON,
     BROWSE_FS,
+    EXECUTE_ASSEMBLY,
+    SOCKS_PROXY,
+    ADV_PERSISTENCE,
+    DUMP_LSASS,
+    LIST_WEBCAMS,
+    GET_LOGS,
     UNKNOWN // For tasks that don't map to a known type
 };
 

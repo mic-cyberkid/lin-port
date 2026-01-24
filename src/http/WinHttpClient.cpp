@@ -67,7 +67,7 @@ std::string WinHttpClient::get(const std::wstring& server, const std::wstring& p
     return response;
 }
 
-std::vector<BYTE> WinHttpClient::post(const std::wstring& server, const std::wstring& path, const std::vector<BYTE>& data) {
+std::vector<BYTE> WinHttpClient::post(const std::wstring& server, const std::wstring& path, const std::vector<BYTE>& data, const std::wstring& headers) {
     HINTERNET connectHandle = nullptr;
     HINTERNET requestHandle = nullptr;
     std::vector<BYTE> response;
@@ -86,7 +86,10 @@ std::vector<BYTE> WinHttpClient::post(const std::wstring& server, const std::wst
         throw std::runtime_error("Failed to open request.");
     }
 
-    if (!WinHttpSendRequest(requestHandle, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+    DWORD headerLen = headers.empty() ? 0 : static_cast<DWORD>(headers.length());
+    LPCWSTR headerPtr = headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str();
+
+    if (!WinHttpSendRequest(requestHandle, headerPtr, headerLen,
                             (LPVOID)data.data(), static_cast<DWORD>(data.size()), static_cast<DWORD>(data.size()), 0)) {
         WinHttpCloseHandle(requestHandle);
         WinHttpCloseHandle(connectHandle);

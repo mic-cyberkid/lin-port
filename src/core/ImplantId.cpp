@@ -17,9 +17,9 @@ std::string getMachineGuid() {
             if (RegQueryValueExW(hKey, L"MachineGuid", NULL, NULL, (LPBYTE)value.data(), &size) == ERROR_SUCCESS) {
                 RegCloseKey(hKey);
                 std::wstring wstr(value.data());
-                int len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+                int len = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.length(), NULL, 0, NULL, NULL);
                 std::string r(len, '\0');
-                WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &r[0], len, NULL, NULL);
+                WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.length(), &r[0], len, NULL, NULL);
                 return r;
             }
         }

