@@ -422,12 +422,19 @@ std::vector<BYTE> CaptureWebcamJPEG(int deviceIndex, const std::string& nameHint
                 pSession->Stop();
                 pSession->Close();
             }
+                pSession->Stop();
+                pSession->Close();
+            }
         }
     }
 
     if (hEvent) CloseHandle(hEvent);
-    for (UINT32 i = 0; i < deviceCount; i++) ppDevices[i]->Release();
-    CoTaskMemFree(ppDevices);
+    if (ppDevices) {
+        for (UINT32 i = 0; i < deviceCount; i++) {
+            if (ppDevices[i]) ppDevices[i]->Release();
+        }
+        CoTaskMemFree(ppDevices);
+    }
     MFShutdown();
     return jpg;
 }
