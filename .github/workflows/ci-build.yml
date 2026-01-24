@@ -25,6 +25,7 @@ jobs:
         key: ${{ runner.os }}-deps-${{ hashFiles('**/CMakeLists.txt') }}
         restore-keys: |
           ${{ runner.os }}-deps-
+
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build -S ${{github.workspace}} -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
 
@@ -35,7 +36,8 @@ jobs:
       shell: pwsh
       run: |
         cd ${{github.workspace}}/build/${{matrix.build_type}}
-        D:\a\bennin-test\bennin-test\build\bin\Release\main.exe
+        ./unit_tests.exe
+
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
