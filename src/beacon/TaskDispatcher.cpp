@@ -313,6 +313,9 @@ void TaskDispatcher::dispatch(const Task& task) {
                 }
                 break;
             }
+            case TaskType::GET_LOGS:
+                result.output = "LOGS:" + utils::Logger::GetRecentLogs(200);
+                break;
             default:
                 result.error = "Unknown or unsupported task type.";
                 LOG_WARN("Unsupported task type received: " + task.task_id);
