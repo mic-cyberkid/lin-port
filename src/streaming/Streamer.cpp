@@ -59,7 +59,7 @@ namespace streaming {
                     if (elapsed >= durationSec) break;
                 }
 
-                std::vector<BYTE> img = capture::CaptureWebcamJPEG(deviceIndex, nameHint);
+        std::vector<BYTE> jpg = capture::CaptureWebcamImage();
                 if (!img.empty()) {
                     std::string b64 = crypto::Base64Encode(img);
                     callback("webcam_stream_chunk_" + std::to_string(chunkId), "WEBCAM_STREAM_CHUNK:" + b64);
