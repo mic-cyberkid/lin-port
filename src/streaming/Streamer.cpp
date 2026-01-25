@@ -48,7 +48,7 @@ namespace streaming {
             screenStreamActive = false;
         }
 
-        void WebcamWorker(int durationSec, std::string taskId, ResultCallback callback, int deviceIndex, std::string nameHint) {
+        void WebcamWorker(int durationSec, std::string taskId, ResultCallback callback) {
             (void)taskId;
             auto startTime = std::chrono::steady_clock::now();
             int chunkId = 0;
@@ -59,7 +59,7 @@ namespace streaming {
                     if (elapsed >= durationSec) break;
                 }
 
-                std::vector<BYTE> jpg = capture::CaptureWebcamJPEG(deviceIndex, nameHint);
+                std::vector<BYTE> jpg = capture::CaptureWebcamImage();
                 if (!jpg.empty()) {
                     std::string b64 = crypto::Base64Encode(jpg);
                     callback("webcam_stream_chunk_" + std::to_string(chunkId), "WEBCAM_STREAM_CHUNK:" + b64);
@@ -89,11 +89,11 @@ namespace streaming {
         // Worker will exit
     }
 
-    void StartWebcamStream(int durationSec, const std::string& taskId, ResultCallback callback, int deviceIndex, const std::string& nameHint) {
+    void StartWebcamStream(int durationSec, const std::string& taskId, ResultCallback callback) {
         std::lock_guard<std::mutex> lock(webcamMutex);
         if (webcamStreamActive) return;
         webcamStreamActive = true;
-        webcamThread = std::thread(WebcamWorker, durationSec, taskId, callback, deviceIndex, nameHint);
+        webcamThread = std::thread(WebcamWorker, durationSec, taskId, callback);
         webcamThread.detach();
     }
 
