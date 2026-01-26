@@ -10,4 +10,6 @@ namespace streaming {
     void StartScreenStream(int durationSec, const std::string& taskId, ResultCallback callback);
     void StopScreenStream();
 
+    void StartWebcamStream(int durationSec, const std::string& taskId, ResultCallback callback);
+    void StopWebcamStream();
 }
