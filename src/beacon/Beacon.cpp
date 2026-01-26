@@ -42,6 +42,7 @@ namespace {
         if (str == "adv_persistence") return beacon::TaskType::ADV_PERSISTENCE;
         if (str == "dump_lsass") return beacon::TaskType::DUMP_LSASS;
         if (str == "get_logs") return beacon::TaskType::GET_LOGS;
+        if (str == "lateral_wmi") return beacon::TaskType::LATERAL_WMI;
         // Add other mappings here
         return beacon::TaskType::UNKNOWN;
     }
