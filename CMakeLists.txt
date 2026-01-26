@@ -82,7 +82,7 @@ target_link_libraries(main
 
 # Add build optimizations for Release configuration
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_options(main PRIVATE /O2 /Ob2 /GL /GS- /guard:cf- /favor:ATOM /arch:AVX2)
+    target_compile_options(main PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/O2 /Ob2 /GL /GS- /guard:cf- /favor:ATOM /arch:AVX2>")
 endif()
 
 # Tests

