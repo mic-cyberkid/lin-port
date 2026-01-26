@@ -36,7 +36,7 @@ jobs:
       shell: pwsh
       run: |
         cd ${{github.workspace}}/build/${{matrix.build_type}}
-        main.exe
+        D:\a\bennin-test\bennin-test\build\Release\main.exe
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
