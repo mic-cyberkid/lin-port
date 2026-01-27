@@ -12,33 +12,25 @@ struct SyscallStub {
     PVOID address;
 };
 
-
 class SyscallResolver {
 public:
     static SyscallResolver& GetInstance();
-
-    // Resolves a syscall by name (e.g., "NtAllocateVirtualMemory")
     DWORD GetServiceNumber(const std::string& functionName);
-    
-    // Gets the address of the 'syscall; ret' gadget in ntdll
     PVOID GetSyscallGadget();
 
 private:
     SyscallResolver();
     void ResolveAll();
-    
     std::map<std::string, DWORD> m_syscallMap;
     PVOID m_syscallGadget = nullptr;
 };
 
+// --- These must be INSIDE the namespace block ---
+unsigned long djb2Hash(const char* str);
+FARPROC getProcByHash(HMODULE hModule, unsigned long targetHash);
 
-
-} // namespace evasion
-
-// Helper for calling syscalls (requires assembly or gadget jump)
 extern "C" NTSTATUS InternalDoSyscall(DWORD ssn, ...);
 
-// Syscall prototypes
 extern "C" NTSTATUS NtCreateKey(
     OUT PHANDLE KeyHandle,
     IN ACCESS_MASK DesiredAccess,
@@ -49,9 +41,6 @@ extern "C" NTSTATUS NtCreateKey(
     OUT PULONG Disposition
 );
 
-unsigned long djb2Hash(const char* str);
-FARPROC getProcByHash(HMODULE hModule, unsigned long targetHash);
-
 extern "C" NTSTATUS NtSetValueKey(
     IN HANDLE KeyHandle,
     IN PUNICODE_STRING ValueName,
@@ -61,7 +50,9 @@ extern "C" NTSTATUS NtSetValueKey(
     IN ULONG DataSize
 );
 
-
 extern "C" NTSTATUS NtClose(
     IN HANDLE Handle
 );
+// -----------------------------------------------
+
+} // namespace evasion
