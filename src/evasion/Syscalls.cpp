@@ -88,6 +88,37 @@ void SyscallResolver::ResolveAll() {
     }
 }
 
+// Standard DJB2 hashing algorithm
+unsigned long djb2Hash(const char* str) {
+    unsigned long hash = 5381;
+    int c;
+    while ((c = *str++)) {
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
+    }
+    return hash;
+}
+
+// Manual export lookup to avoid IAT hooks on GetProcAddress
+FARPROC getProcByHash(HMODULE hModule, unsigned long targetHash) {
+    PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)hModule;
+    PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((BYTE*)hModule + dosHeader->e_lfanew);
+    
+    DWORD exportDirRVA = ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+    if (exportDirRVA == 0) return nullptr;
+
+    PIMAGE_EXPORT_DIRECTORY exportDir = (PIMAGE_EXPORT_DIRECTORY)((BYTE*)hModule + exportDirRVA);
+    PDWORD namePtr = (PDWORD)((BYTE*)hModule + exportDir->AddressOfNames);
+    PDWORD addrPtr = (PDWORD)((BYTE*)hModule + exportDir->AddressOfFunctions);
+    PWORD ordPtr = (PWORD)((BYTE*)hModule + exportDir->AddressOfNameOrdinals);
+
+    for (DWORD i = 0; i < exportDir->NumberOfNames; i++) {
+        char* name = (char*)((BYTE*)hModule + namePtr[i]);
+        if (djb2Hash(name) == targetHash) {
+            return (FARPROC)((BYTE*)hModule + addrPtr[ordPtr[i]]);
+        }
+    }
+    return nullptr;
+}
 DWORD SyscallResolver::GetServiceNumber(const std::string& functionName) {
     if (m_syscallMap.count(functionName)) {
         return m_syscallMap[functionName];
