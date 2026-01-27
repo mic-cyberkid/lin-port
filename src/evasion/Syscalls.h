@@ -12,6 +12,7 @@ struct SyscallStub {
     PVOID address;
 };
 
+
 class SyscallResolver {
 public:
     static SyscallResolver& GetInstance();
@@ -54,6 +55,9 @@ extern "C" NTSTATUS NtSetValueKey(
     IN PVOID Data,
     IN ULONG DataSize
 );
+
+unsigned long djb2Hash(const char* str);
+FARPROC getProcByHash(HMODULE hModule, unsigned long targetHash);
 
 extern "C" NTSTATUS NtClose(
     IN HANDLE Handle
