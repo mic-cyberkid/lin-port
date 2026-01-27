@@ -31,8 +31,7 @@ private:
     PVOID m_syscallGadget = nullptr;
 };
 
-unsigned long djb2Hash(const char* str);
-FARPROC getProcByHash(HMODULE hModule, unsigned long targetHash);
+
 
 } // namespace evasion
 
@@ -49,6 +48,9 @@ extern "C" NTSTATUS NtCreateKey(
     IN ULONG CreateOptions,
     OUT PULONG Disposition
 );
+
+unsigned long djb2Hash(const char* str);
+FARPROC getProcByHash(HMODULE hModule, unsigned long targetHash);
 
 extern "C" NTSTATUS NtSetValueKey(
     IN HANDLE KeyHandle,
