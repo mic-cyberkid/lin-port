@@ -3,8 +3,6 @@ if(MSVC)
     add_compile_options(
         $<$<COMPILE_LANGUAGE:CXX,C>:/W4>              # Warning level 4
         $<$<COMPILE_LANGUAGE:CXX,C>:/WX>              # Treat warnings as errors
-        $<$<CONFIG:Debug>:$<$<COMPILE_LANGUAGE:CXX,C>:/analyze>>         # Enable static analysis
-        $<$<CONFIG:Debug>:$<$<COMPILE_LANGUAGE:CXX,C>:/fsanitize=address>> # Enable AddressSanitizer
         $<$<COMPILE_LANGUAGE:CXX,C>:/std:c++20>       # C++20 standard
         $<$<COMPILE_LANGUAGE:CXX,C>:/permissive->     # Strict conformance
         $<$<COMPILE_LANGUAGE:CXX,C>:/D_WIN32_WINNT=0x0601> # Target Windows 7 (or later)

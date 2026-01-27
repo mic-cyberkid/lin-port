@@ -1,10 +1,7 @@
 #pragma once
-
-#include <windows.h>
 #include <vector>
+#include <windows.h>
 
 namespace capture {
-
-std::vector<BYTE> CaptureWebcamImage();
-
-} // namespace capture
+    std::vector<BYTE> CaptureWebcamImage();
+}

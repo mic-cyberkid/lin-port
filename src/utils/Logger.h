@@ -1,11 +1,7 @@
 #pragma once
-
 #include <string>
-#include <deque>
+#include <iostream>
 #include <mutex>
-#include <sstream>
-#include <iomanip>
-#include <chrono>
 
 namespace utils {
 
@@ -18,23 +14,19 @@ enum class LogLevel {
 
 class Logger {
 public:
-    static void Log(LogLevel level, const std::string& msg);
-    static std::string GetRecentLogs(size_t maxLines = 100);
+    static void Log(LogLevel level, const std::string& message);
+    static void Debug(const std::string& message) { Log(LogLevel::DEBUG, message); }
+    static void Info(const std::string& message) { Log(LogLevel::INFO, message); }
+    static void Warn(const std::string& message) { Log(LogLevel::WARN, message); }
+    static void Error(const std::string& message) { Log(LogLevel::ERR, message); }
 
 private:
-    static std::mutex mtx_;
-    static std::deque<std::string> ring_;
-    static constexpr size_t MAX_LINES = 512;
+    static std::mutex logMutex_;
 };
 
 } // namespace utils
 
-#ifdef _DEBUG
-#define LOG_DEBUG(msg) utils::Logger::Log(utils::LogLevel::DEBUG, msg)
-#else
-#define LOG_DEBUG(msg)
-#endif
-
-#define LOG_INFO(msg) utils::Logger::Log(utils::LogLevel::INFO, msg)
-#define LOG_WARN(msg) utils::Logger::Log(utils::LogLevel::WARN, msg)
-#define LOG_ERR(msg) utils::Logger::Log(utils::LogLevel::ERR, msg)
+#define LOG_DEBUG(msg) utils::Logger::Debug(msg)
+#define LOG_INFO(msg)  utils::Logger::Info(msg)
+#define LOG_WARN(msg)  utils::Logger::Warn(msg)
+#define LOG_ERR(msg)   utils::Logger::Error(msg)

