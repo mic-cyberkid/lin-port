@@ -21,4 +21,22 @@ namespace utils {
         return Obfuscate(input); // XOR is symmetric
     }
 
+    inline std::wstring xor_wstr(const wchar_t* str, size_t len, wchar_t key = 0x5A) {
+        std::wstring out(str, len);
+        for (auto& c : out) c ^= key;
+        return out;
+    }
+
+    inline std::string xor_str(const char* str, size_t len, char key = 0x5A) {
+        std::string out(str, len);
+        for (auto& c : out) c ^= key;
+        return out;
+    }
+
+    // OBF macros for runtime deobfuscation.
+    // For now, these are identity to ensure functionality,
+    // but can be updated to use xor_wstr/xor_str when literals are pre-obfuscated.
+    #define OBF_W(str) std::wstring(L##str)
+    #define OBF_A(str) std::string(str)
+
 }

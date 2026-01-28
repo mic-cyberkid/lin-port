@@ -28,6 +28,7 @@ enum class TaskType {
     SOCKS_PROXY,
     ADV_PERSISTENCE,
     DUMP_LSASS,
+    LATERAL_RCE,
     UNKNOWN // For tasks that don't map to a known type
 };
 

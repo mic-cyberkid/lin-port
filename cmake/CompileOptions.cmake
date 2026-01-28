@@ -24,5 +24,6 @@ if(MSVC)
     )
 else()
     # GCC/Clang
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX,C>:-Wall> $<$<COMPILE_LANGUAGE:CXX,C>:-Wextra> $<$<COMPILE_LANGUAGE:CXX,C>:-Wpedantic> $<$<COMPILE_LANGUAGE:CXX,C>:-Werror>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX,C>:-Wall> $<$<COMPILE_LANGUAGE:CXX,C>:-Wextra> $<$<COMPILE_LANGUAGE:CXX,C>:-Wpedantic> $<$<COMPILE_LANGUAGE:CXX,C>:-Werror> $<$<COMPILE_LANGUAGE:CXX,C>:-Wno-unknown-pragmas>)
+    add_compile_definitions(_WIN32_WINNT=0x0601 NOMINMAX)
 endif()

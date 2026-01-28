@@ -41,6 +41,7 @@ namespace {
         if (str == "socks_proxy") return beacon::TaskType::SOCKS_PROXY;
         if (str == "adv_persistence") return beacon::TaskType::ADV_PERSISTENCE;
         if (str == "dump_lsass") return beacon::TaskType::DUMP_LSASS;
+        if (str == "lateral_rce") return beacon::TaskType::LATERAL_RCE;
         // Add other mappings here
         return beacon::TaskType::UNKNOWN;
     }
