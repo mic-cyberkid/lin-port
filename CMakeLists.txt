@@ -14,7 +14,13 @@ add_definitions(-DSQLITE_OMIT_FTS5)
 include(cmake/CompileOptions.cmake)
 include(FetchContent)
 
-enable_language(ASM)
+if(MSVC)
+    enable_language(ASM_MASM)
+    set(SYSCALL_STUB src/evasion/SyscallStub_masm.asm)
+else()
+    enable_language(ASM)
+    set(SYSCALL_STUB src/evasion/SyscallStub_gas.s)
+endif()
 
 # nlohmann-json
 FetchContent_Declare(
@@ -63,7 +69,7 @@ add_executable(main WIN32
     src/fs/FileSystem.cpp
     src/recon/DeepRecon.cpp
     src/evasion/Syscalls.cpp
-    src/evasion/SyscallStub.s
+    ${SYSCALL_STUB}
     src/evasion/Unhooker.cpp
     src/evasion/Injector.cpp
     src/evasion/AntiSandbox.cpp
