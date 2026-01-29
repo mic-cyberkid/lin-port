@@ -113,16 +113,16 @@ namespace {
 
         NTSTATUS status = InternalDoSyscall(ntCreateFileSsn,
             &hFile,
-            (PVOID)(FILE_GENERIC_WRITE | SYNCHRONIZE),
+            (PVOID)(UINT_PTR)(FILE_GENERIC_WRITE | SYNCHRONIZE),
             &objAttr,
             &ioStatus,
             NULL,
-            (PVOID)FILE_ATTRIBUTE_NORMAL,
+            (PVOID)(UINT_PTR)FILE_ATTRIBUTE_NORMAL,
             0,
-            (PVOID)FILE_OVERWRITE_IF,
-            (PVOID)(FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE),
+            (PVOID)(UINT_PTR)FILE_OVERWRITE_IF,
+            (PVOID)(UINT_PTR)(FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE),
             NULL,
-            0);
+            (PVOID)(UINT_PTR)0);
 
         if (!NT_SUCCESS(status)) return false;
 
@@ -133,7 +133,7 @@ namespace {
             NULL,
             &ioStatus,
             (PVOID)data.data(),
-            (PVOID)(ULONG)data.size(),
+            (PVOID)(UINT_PTR)(ULONG)data.size(),
             NULL,
             NULL,
             NULL,

@@ -54,20 +54,20 @@ bool SyscallWriteFile(const std::wstring& ntPath, const std::vector<BYTE>& data)
 
     NTSTATUS status = InternalDoSyscall(ntCreateFileSsn,
         &hFile,
-        (PVOID)(FILE_GENERIC_WRITE | SYNCHRONIZE),
+        (PVOID)(UINT_PTR)(FILE_GENERIC_WRITE | SYNCHRONIZE),
         &objAttr,
         &ioStatus,
         NULL,
-        (PVOID)FILE_ATTRIBUTE_NORMAL,
+        (PVOID)(UINT_PTR)FILE_ATTRIBUTE_NORMAL,
         0,
-        (PVOID)FILE_OVERWRITE_IF,
-        (PVOID)(FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE),
+        (PVOID)(UINT_PTR)FILE_OVERWRITE_IF,
+        (PVOID)(UINT_PTR)(FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE),
         NULL,
-        0);
+        (PVOID)(UINT_PTR)0);
 
     if (!NT_SUCCESS(status)) return false;
 
-    status = InternalDoSyscall(ntWriteFileSsn, hFile, NULL, NULL, NULL, &ioStatus, (PVOID)data.data(), (PVOID)(ULONG)data.size(), NULL, NULL, NULL, NULL);
+    status = InternalDoSyscall(ntWriteFileSsn, hFile, NULL, NULL, NULL, &ioStatus, (PVOID)data.data(), (PVOID)(UINT_PTR)(ULONG)data.size(), NULL, NULL, NULL, NULL);
 
     InternalDoSyscall(ntCloseSsn, hFile, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     return NT_SUCCESS(status);
