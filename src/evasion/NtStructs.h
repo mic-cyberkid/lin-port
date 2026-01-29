@@ -30,6 +30,10 @@ typedef struct _IO_STATUS_BLOCK {
 
 #define OBJ_CASE_INSENSITIVE 0x00000040L
 
+#define FILE_OVERWRITE_IF 0x00000005
+#define FILE_SYNCHRONOUS_IO_NONALERT 0x00000020
+#define FILE_NON_DIRECTORY_FILE 0x00000040
+
 #define InitializeObjectAttributes(p, n, a, r, s) { \
     (p)->Length = sizeof(OBJECT_ATTRIBUTES);        \
     (p)->RootDirectory = r;                         \

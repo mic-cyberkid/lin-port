@@ -26,6 +26,11 @@ std::wstring GetCurrentUserSid() {
 
     DWORD dwSize = 0;
     GetTokenInformation(hToken, TokenUser, NULL, 0, &dwSize);
+    if (dwSize == 0) {
+        CloseHandle(hToken);
+        return L"";
+    }
+
     std::vector<BYTE> buffer(dwSize);
     PTOKEN_USER pTokenUser = (PTOKEN_USER)buffer.data();
 

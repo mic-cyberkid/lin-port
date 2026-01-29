@@ -32,4 +32,8 @@ private:
 } // namespace evasion
 
 // Helper for calling syscalls (requires assembly or gadget jump)
-extern "C" NTSTATUS InternalDoSyscall(DWORD ssn, ...);
+// Prototype with maximum expected arguments to ensure caller allocates enough stack space.
+extern "C" NTSTATUS InternalDoSyscall(DWORD ssn,
+    PVOID a1, PVOID a2, PVOID a3, PVOID a4,
+    PVOID a5, PVOID a6, PVOID a7, PVOID a8,
+    PVOID a9, PVOID a10, PVOID a11);
