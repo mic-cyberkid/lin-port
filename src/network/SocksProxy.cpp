@@ -36,6 +36,7 @@ void SocksProxy::ListenThread(int port) {
     if (m_listenSocket == INVALID_SOCKET) return;
 
     sockaddr_in addr;
+    RtlZeroMemory(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons((u_short)port);
@@ -86,6 +87,7 @@ void SocksProxy::HandleClient(SOCKET client) {
     SOCKET target = INVALID_SOCKET;
     if (buffer[3] == 0x01) { // IPv4
         sockaddr_in targetAddr;
+        RtlZeroMemory(&targetAddr, sizeof(targetAddr));
         targetAddr.sin_family = AF_INET;
         recv(client, (char*)&targetAddr.sin_addr, 4, 0);
         recv(client, (char*)&targetAddr.sin_port, 2, 0);
@@ -102,7 +104,8 @@ void SocksProxy::HandleClient(SOCKET client) {
         unsigned short port;
         recv(client, (char*)&port, 2, 0);
 
-        addrinfo hints = { 0 }, *res;
+        addrinfo hints, *res;
+        RtlZeroMemory(&hints, sizeof(hints));
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
         if (getaddrinfo(domain.c_str(), std::to_string(ntohs(port)).c_str(), &hints, &res) == 0) {

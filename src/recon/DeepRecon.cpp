@@ -1,9 +1,9 @@
 #include "DeepRecon.h"
-#include "../external/nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
 #include <windows.h>
 #include <iphlpapi.h>
+#include <wbemidl.h>
 #include <comdef.h>
-#include <WbemIdl.h>
 #include <vector>
 #include <iostream>
 #include <iomanip>
@@ -23,7 +23,8 @@ namespace recon {
             if (FAILED(hr)) return results;
 
             IWbemServices* pSvc = NULL;
-            hr = pLoc->ConnectServer(_bstr_t(nspace.c_str()), NULL, NULL, 0, NULL, 0, 0, &pSvc);
+            // 5th argument is LONG lSecurityFlags
+            hr = pLoc->ConnectServer(_bstr_t(nspace.c_str()), NULL, NULL, 0, 0, 0, 0, &pSvc);
             if (FAILED(hr)) {
                 pLoc->Release();
                 return results;
@@ -48,7 +49,8 @@ namespace recon {
             ULONG uReturn = 0;
 
             while (pEnumerator) {
-                hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
+                // Cast WBEM_INFINITE to LONG to avoid overflow warning/error
+                hr = pEnumerator->Next((LONG)WBEM_INFINITE, 1, &pclsObj, &uReturn);
                 if (0 == uReturn) break;
 
                 nlohmann::json item;
@@ -87,13 +89,14 @@ namespace recon {
             nlohmann::json arpList = nlohmann::json::array();
             ULONG outBufLen = sizeof(MIB_IPNETTABLE);
             PMIB_IPNETTABLE pIpNetTable = (MIB_IPNETTABLE*)malloc(outBufLen);
+            if (!pIpNetTable) return "[]";
             
             if (GetIpNetTable(pIpNetTable, &outBufLen, FALSE) == ERROR_INSUFFICIENT_BUFFER) {
                 free(pIpNetTable);
                 pIpNetTable = (MIB_IPNETTABLE*)malloc(outBufLen);
             }
 
-            if (GetIpNetTable(pIpNetTable, &outBufLen, FALSE) == NO_ERROR) {
+            if (pIpNetTable && GetIpNetTable(pIpNetTable, &outBufLen, FALSE) == NO_ERROR) {
                 for (DWORD i = 0; i < pIpNetTable->dwNumEntries; i++) {
                     if (pIpNetTable->table[i].dwType != 2) { // Skip invalid
                         nlohmann::json entry;
@@ -112,7 +115,7 @@ namespace recon {
                     }
                 }
             }
-            free(pIpNetTable);
+            if (pIpNetTable) free(pIpNetTable);
             return arpList.dump();
         }
     }
@@ -120,21 +123,20 @@ namespace recon {
     std::string GetDeepRecon() {
         nlohmann::json reconData;
         
-        // 1. Domain Info
+        // domain_info
         reconData["domain_info"] = QueryWMI(L"ROOT\\CIMV2", L"SELECT DNSHostName, Domain, PartOfDomain, DomainRole, Workgroup FROM Win32_ComputerSystem", 
             {L"DNSHostName", L"Domain", L"PartOfDomain", L"DomainRole", L"Workgroup"});
 
-        // 2. Security Products
+        // security_products
         reconData["security_products"] = QueryWMI(L"ROOT\\SecurityCenter2", L"SELECT displayName, productState, pathToSignedProductExe FROM AntiVirusProduct", 
             {L"displayName", L"productState", L"pathToSignedProductExe"});
         
         if (reconData["security_products"].empty()) {
-             // Try older namespace
              reconData["security_products"] = QueryWMI(L"ROOT\\SecurityCenter", L"SELECT displayName, productState, pathToSignedProductExe FROM AntiVirusProduct", 
                 {L"displayName", L"productState", L"pathToSignedProductExe"});
         }
 
-        // 3. ARP Table
+        // arp_table
         reconData["arp_table"] = nlohmann::json::parse(GetArpTable());
 
         return reconData.dump(4);

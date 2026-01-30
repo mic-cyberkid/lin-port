@@ -9,7 +9,11 @@ namespace utils {
         std::string result;
         HANDLE hPipeRead, hPipeWrite;
 
-        SECURITY_ATTRIBUTES saAttr = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+        SECURITY_ATTRIBUTES saAttr;
+        RtlZeroMemory(&saAttr, sizeof(saAttr));
+        saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+        saAttr.lpSecurityDescriptor = NULL;
+        saAttr.bInheritHandle = TRUE;
 
         if (!CreatePipe(&hPipeRead, &hPipeWrite, &saAttr, 0)) {
             return "";
@@ -18,13 +22,16 @@ namespace utils {
         // Ensure the read handle to the pipe for STDOUT is not inherited.
         SetHandleInformation(hPipeRead, HANDLE_FLAG_INHERIT, 0);
 
-        STARTUPINFOA si = { sizeof(STARTUPINFOA) };
+        STARTUPINFOA si;
+        PROCESS_INFORMATION pi;
+        RtlZeroMemory(&si, sizeof(si));
+        RtlZeroMemory(&pi, sizeof(pi));
+        si.cb = sizeof(si);
         si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
         si.hStdOutput = hPipeWrite;
         si.hStdError = hPipeWrite;
         si.wShowWindow = SW_HIDE; // Hide window
 
-        PROCESS_INFORMATION pi = { 0 };
         std::string cmdLine = "cmd.exe /c " + cmd;
 
         if (!CreateProcessA(NULL, &cmdLine[0], NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {

@@ -12,6 +12,10 @@
 
 #pragma comment(lib, "wlanapi.lib")
 
+#ifndef WLAN_PROFILE_GET_PLAINTEXT_KEY
+#define WLAN_PROFILE_GET_PLAINTEXT_KEY 4
+#endif
+
 namespace wifi {
 
     namespace {

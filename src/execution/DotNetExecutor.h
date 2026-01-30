@@ -2,9 +2,7 @@
 #include <windows.h>
 #include <vector>
 #include <string>
-#include <metahost.h>
-
-#pragma comment(lib, "mscoree.lib")
+#include <cstdint>
 
 namespace execution {
 
@@ -20,9 +18,6 @@ private:
     bool StartCLR();
     void StopCLR();
 
-    ICLRMetaHost* m_pMetaHost = nullptr;
-    ICLRRuntimeInfo* m_pRuntimeInfo = nullptr;
-    ICorRuntimeHost* m_pRuntimeHost = nullptr;
     bool m_clrStarted = false;
 };
 

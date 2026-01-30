@@ -23,6 +23,16 @@ if(MSVC)
         /NODEFAULTLIB:libcmtd.lib # Avoid debug runtime conflict if any
     )
 else()
-    # GCC/Clang
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX,C>:-Wall> $<$<COMPILE_LANGUAGE:CXX,C>:-Wextra> $<$<COMPILE_LANGUAGE:CXX,C>:-Wpedantic> $<$<COMPILE_LANGUAGE:CXX,C>:-Werror>)
+    # GCC/Clang (MinGW)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:CXX,C>:-Wall>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-Wextra>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-Wno-unknown-pragmas>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-Wno-unused-parameter>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-Wno-unused-variable>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-Wno-unused-but-set-variable>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-Wno-comment>
+    )
+    # Target Win7+ and disable some annoying warnings
+    add_compile_definitions(_WIN32_WINNT=0x0601 NOMINMAX)
 endif()

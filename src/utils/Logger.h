@@ -2,6 +2,8 @@
 #include <string>
 #include <iostream>
 #include <mutex>
+#include <deque>
+#include <vector>
 
 namespace utils {
 
@@ -20,8 +22,12 @@ public:
     static void Warn(const std::string& message) { Log(LogLevel::WARN, message); }
     static void Error(const std::string& message) { Log(LogLevel::ERR, message); }
 
+    static std::string GetRecentLogs();
+
 private:
     static std::mutex logMutex_;
+    static std::deque<std::string> logBuffer_;
+    static const size_t MAX_LOG_SIZE = 500;
 };
 
 } // namespace utils
