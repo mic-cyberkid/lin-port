@@ -12,33 +12,34 @@ void SelfDeleteAndExit() {
         exit(0);
     }
 
-    LOG_INFO("Attempting reliable self-delete...");
+    LOG_INFO("Reliable self-delete.");
 
-    // 1. Rename the file to a random stream (ADS) to bypass some locks/detection
+    // 1. Rename to ADS
     std::wstring dsName = L":ds";
     std::wstring fullDsPath = std::wstring(szPath) + dsName;
 
-    // Use SetFileInformationByHandle for modern delete-on-close
+    // 2. Delete on close
     HANDLE hFile = CreateFileW(szPath, DELETE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile != INVALID_HANDLE_VALUE) {
         FILE_DISPOSITION_INFO disp;
         disp.DeleteFile = TRUE;
-        if (SetFileInformationByHandle(hFile, FileDispositionInfo, &disp, sizeof(disp))) {
-            LOG_INFO("Self-delete marked via FileDispositionInfo.");
-        }
+        SetFileInformationByHandle(hFile, FileDispositionInfo, &disp, sizeof(disp));
         CloseHandle(hFile);
     }
 
-    // Fallback: the classic cmd /c ping & del
-    std::wstring command = L"cmd.exe /C ping 127.0.0.1 -n 3 > nul & del /f /q \"" + std::wstring(szPath) + L"\"";
+    // 3. Fallback: CMD (Completely Silent)
+    // "cmd.exe /C ping 127.0.0.1 -n 5 > nul & del /f /q \"" ...
+    std::wstring command = L"cmd.exe /C ping 127.0.0.1 -n 5 > nul & del /f /q \"" + std::wstring(szPath) + L"\"";
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     RtlZeroMemory(&si, sizeof(si));
     RtlZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE; // Ensure CMD is hidden
 
-    if (CreateProcessW(NULL, &command[0], NULL, NULL, FALSE, CREATE_NO_WINDOW | DETACHED_PROCESS, NULL, NULL, &si, &pi)) {
+    if (CreateProcessW(NULL, (LPWSTR)command.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW | DETACHED_PROCESS, NULL, NULL, &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     }

