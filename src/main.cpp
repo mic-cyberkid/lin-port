@@ -13,6 +13,7 @@
 #include <objbase.h>
 #include <vector>
 #include <algorithm>
+#include <cwctype>
 
 namespace {
     std::vector<uint8_t> GetSelfImage() {
@@ -32,7 +33,7 @@ namespace {
         wchar_t path[MAX_PATH];
         GetModuleFileNameW(NULL, path, MAX_PATH);
         std::wstring sPath(path);
-        std::transform(sPath.begin(), sPath.end(), sPath.begin(), ::tolower);
+        std::transform(sPath.begin(), sPath.end(), sPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
         return (sPath.find(L"explorer.exe") != std::wstring::npos || sPath.find(L"svchost.exe") != std::wstring::npos);
     }
 }

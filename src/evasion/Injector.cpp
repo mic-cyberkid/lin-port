@@ -2,6 +2,7 @@
 #include "../utils/Logger.h"
 #include <tlhelp32.h>
 #include <algorithm>
+#include <cwctype>
 
 namespace evasion {
 
@@ -110,9 +111,9 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
         if (Process32FirstW(hSnapshot, &pe)) {
             do {
                 std::wstring currentProcess = pe.szExeFile;
-                std::transform(currentProcess.begin(), currentProcess.end(), currentProcess.begin(), ::tolower);
+                std::transform(currentProcess.begin(), currentProcess.end(), currentProcess.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
                 std::wstring targetProcess = processName;
-                std::transform(targetProcess.begin(), targetProcess.end(), targetProcess.begin(), ::tolower);
+                std::transform(targetProcess.begin(), targetProcess.end(), targetProcess.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
                 if (currentProcess == targetProcess) { pid = pe.th32ProcessID; break; }
             } while (Process32NextW(hSnapshot, &pe));
         }
