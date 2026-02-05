@@ -145,7 +145,7 @@ NTSTATUS SysNtGetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext) {
 NTSTATUS SysNtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, PVOID ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList) {
     DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtCreateThreadEx");
     if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, ThreadHandle, (PVOID)DesiredAccess, ObjectAttributes, ProcessHandle, StartRoutine, Argument, (PVOID)(UINT_PTR)CreateFlags, (PVOID)ZeroBits, (PVOID)StackSize, (PVOID)MaximumStackSize, AttributeList);
+    return InternalDoSyscall(ssn, ThreadHandle, (PVOID)(UINT_PTR)DesiredAccess, ObjectAttributes, ProcessHandle, StartRoutine, Argument, (PVOID)(UINT_PTR)CreateFlags, (PVOID)ZeroBits, (PVOID)StackSize, (PVOID)MaximumStackSize, AttributeList);
 }
 
 NTSTATUS SysNtSetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext) {
