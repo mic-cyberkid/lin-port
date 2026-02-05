@@ -5,7 +5,6 @@
 #include <ctime>
 #include <cstring>
 #include <sstream>
-#include <fstream>
 
 namespace utils {
 
@@ -25,15 +24,15 @@ void Logger::Log(LogLevel level, const std::string& message) {
 
     std::time_t now = std::time(nullptr);
     char timestamp[32];
-    struct tm* timeinfo = std::localtime(&now);
-    if (timeinfo) {
-        std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+    struct tm timeinfo;
+    if (localtime_s(&timeinfo, &now) == 0) {
+        std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
     } else {
         std::strcpy(timestamp, "0000-00-00 00:00:00");
     }
 
     char formatted[1024];
-    std::snprintf(formatted, sizeof(formatted), "[%s] [%s] %s", timestamp, levelStr, message.c_str());
+    std::snprintf(formatted, sizeof(formatted), "[%s] [%s] %s\r\n", timestamp, levelStr, message.c_str());
     std::string logLine(formatted);
 
     // 1. Log to circular buffer
@@ -43,19 +42,16 @@ void Logger::Log(LogLevel level, const std::string& message) {
     }
 
     // 2. Log to Debugger
-    std::string dbgMsg = logLine + "\n";
-    OutputDebugStringA(dbgMsg.c_str());
+    OutputDebugStringA(formatted);
 
-    // 3. Log to File in %TEMP%
-    wchar_t tempPath[MAX_PATH];
-    if (GetTempPathW(MAX_PATH, tempPath) > 0) {
-        std::wstring logPath = std::wstring(tempPath) + L"debug_implant.log";
-        std::ofstream logFile;
-        logFile.open(logPath.c_str(), std::ios::app);
-        if (logFile.is_open()) {
-            logFile << logLine << std::endl;
-            logFile.close();
-        }
+    // 3. Log to File via direct Win32 API for maximum reliability
+    // Path: C:\Users\Public\debug_implant.log
+    std::wstring logPath = L"C:\\Users\\Public\\debug_implant.log";
+    HANDLE hFile = CreateFileW(logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        DWORD written;
+        WriteFile(hFile, logLine.c_str(), (DWORD)logLine.length(), &written, NULL);
+        CloseHandle(hFile);
     }
 }
 
