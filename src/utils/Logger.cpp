@@ -1,5 +1,4 @@
 #include "Logger.h"
-#include "Shared.h"
 #include <windows.h>
 #include <cstdio>
 #include <ctime>
@@ -31,38 +30,24 @@ void Logger::Log(LogLevel level, const std::string& message) {
         std::strcpy(timestamp, "0000-00-00 00:00:00");
     }
 
-    char formatted[1024];
-    std::snprintf(formatted, sizeof(formatted), "[%s] [%s] %s\r\n", timestamp, levelStr, message.c_str());
-    std::string logLine(formatted);
+    char formatted[2048];
+    std::snprintf(formatted, sizeof(formatted), "[%s] [%s] %s\n", timestamp, levelStr, message.c_str());
 
-    // 1. Log to circular buffer
-    logBuffer_.push_back(logLine);
-    if (logBuffer_.size() > MAX_LOG_SIZE) {
-        logBuffer_.pop_front();
-    }
-
-    // 2. Log to Debugger
+    // 1. Log to Debugger
     OutputDebugStringA(formatted);
 
-    // 3. Log to File via direct Win32 API for maximum reliability
-    // Path: C:\Users\Public\debug_implant.log
-    std::wstring logPath = L"C:\\Users\\Public\\debug_implant.log";
-    HANDLE hFile = CreateFileW(logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile != INVALID_HANDLE_VALUE) {
-        DWORD written;
-        WriteFile(hFile, logLine.c_str(), (DWORD)logLine.length(), &written, NULL);
-        CloseHandle(hFile);
+    // 2. Log to File via direct C API for reliability
+    FILE* f = std::fopen("C:\\Users\\Public\\debug_implant.txt", "a");
+    if (f) {
+        std::fprintf(f, "%s", formatted);
+        std::fflush(f);
+        std::fclose(f);
     }
 }
 
 std::string Logger::GetRecentLogs() {
     std::lock_guard<std::mutex> lock(logMutex_);
-    std::stringstream ss;
-    for (const auto& log : logBuffer_) {
-        ss << log << "\n";
-    }
-    logBuffer_.clear();
-    return ss.str();
+    return "Logs redirected to C:\\Users\\Public\\debug_implant.txt";
 }
 
 } // namespace utils
