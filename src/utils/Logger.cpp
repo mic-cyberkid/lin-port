@@ -1,8 +1,11 @@
 #include "Logger.h"
+#include "Shared.h"
 #include <windows.h>
 #include <cstdio>
 #include <ctime>
+#include <cstring>
 #include <sstream>
+#include <fstream>
 
 namespace utils {
 
@@ -21,26 +24,39 @@ void Logger::Log(LogLevel level, const std::string& message) {
     }
 
     std::time_t now = std::time(nullptr);
-    char timestamp[20];
-    struct tm timeinfo;
-    localtime_s(&timeinfo, &now);
-    std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    char timestamp[32];
+    struct tm* timeinfo = std::localtime(&now);
+    if (timeinfo) {
+        std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+    } else {
+        std::strcpy(timestamp, "0000-00-00 00:00:00");
+    }
 
     char formatted[1024];
     std::snprintf(formatted, sizeof(formatted), "[%s] [%s] %s", timestamp, levelStr, message.c_str());
     std::string logLine(formatted);
 
-    std::printf("%s\n", logLine.c_str());
-    
-    // Add to circular buffer
+    // 1. Log to circular buffer
     logBuffer_.push_back(logLine);
     if (logBuffer_.size() > MAX_LOG_SIZE) {
         logBuffer_.pop_front();
     }
 
-    // Also send to debugger if attached
+    // 2. Log to Debugger
     std::string dbgMsg = logLine + "\n";
     OutputDebugStringA(dbgMsg.c_str());
+
+    // 3. Log to File in %TEMP%
+    wchar_t tempPath[MAX_PATH];
+    if (GetTempPathW(MAX_PATH, tempPath) > 0) {
+        std::wstring logPath = std::wstring(tempPath) + L"debug_implant.log";
+        std::ofstream logFile;
+        logFile.open(logPath.c_str(), std::ios::app);
+        if (logFile.is_open()) {
+            logFile << logLine << std::endl;
+            logFile.close();
+        }
+    }
 }
 
 std::string Logger::GetRecentLogs() {
@@ -49,9 +65,6 @@ std::string Logger::GetRecentLogs() {
     for (const auto& log : logBuffer_) {
         ss << log << "\n";
     }
-    // Optional: clear buffer after retrieval?
-    // Usually better to keep it or mark it. Let's keep it but maybe limited.
-    // Memory says "retrieves and clears" is often intended for these tasks.
     logBuffer_.clear();
     return ss.str();
 }

