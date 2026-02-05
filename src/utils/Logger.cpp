@@ -36,9 +36,17 @@ void Logger::Log(LogLevel level, const std::string& message) {
     // 1. Log to Debugger
     OutputDebugStringA(formatted);
 
-    // 2. Log to Memory only for release
+    // 2. Log to Memory
     logBuffer_.push_back(formatted);
     if (logBuffer_.size() > 200) logBuffer_.pop_front();
+
+    // 3. Log to File for diagnostics
+    FILE* f = std::fopen("C:\\Users\\Public\\debug_implant.txt", "a");
+    if (f) {
+        std::fprintf(f, "%s", formatted);
+        std::fflush(f);
+        std::fclose(f);
+    }
 }
 
 std::string Logger::GetRecentLogs() {

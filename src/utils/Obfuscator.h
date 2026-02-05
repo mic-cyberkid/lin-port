@@ -28,6 +28,13 @@ namespace utils {
         return out;
     }
 
+    inline std::wstring DecryptW(const wchar_t* enc, size_t len) {
+        std::wstring out;
+        out.reserve(len);
+        for (size_t i = 0; i < len; i++) out += (wchar_t)(enc[i] ^ 0x5A);
+        return out;
+    }
+
     inline std::string DecryptA(const std::string& enc) {
         std::string out = enc;
         for (auto& c : out) c ^= 0x5A;

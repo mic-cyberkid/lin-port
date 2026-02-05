@@ -38,6 +38,7 @@ NTSTATUS SysNtResumeThread(HANDLE ThreadHandle, PULONG SuspendCount);
 NTSTATUS SysNtSuspendThread(HANDLE ThreadHandle, PULONG PreviousSuspendCount);
 NTSTATUS SysNtGetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext);
 NTSTATUS SysNtSetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext);
+NTSTATUS SysNtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, PVOID ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList);
 
 } // namespace evasion
 

