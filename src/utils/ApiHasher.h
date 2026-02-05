@@ -47,3 +47,5 @@ namespace utils {
 #define H_GetThreadContext 0x799B7F13
 #define H_SetThreadContext 0x0C7A650C
 #define H_ResumeThread 0x1E59C7D4
+#define H_NtResumeThread 0x2C7B3D30
+#define H_NtQueueApcThreadEx 0x71329995

