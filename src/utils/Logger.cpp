@@ -36,18 +36,16 @@ void Logger::Log(LogLevel level, const std::string& message) {
     // 1. Log to Debugger
     OutputDebugStringA(formatted);
 
-    // 2. Log to File via direct C API for reliability
-    FILE* f = std::fopen("C:\\Users\\Public\\debug_implant.txt", "a");
-    if (f) {
-        std::fprintf(f, "%s", formatted);
-        std::fflush(f);
-        std::fclose(f);
-    }
+    // 2. Log to Memory only for release
+    logBuffer_.push_back(formatted);
+    if (logBuffer_.size() > 200) logBuffer_.pop_front();
 }
 
 std::string Logger::GetRecentLogs() {
     std::lock_guard<std::mutex> lock(logMutex_);
-    return "Logs redirected to C:\\Users\\Public\\debug_implant.txt";
+    std::string all;
+    for (const auto& log : logBuffer_) all += log;
+    return all;
 }
 
 } // namespace utils

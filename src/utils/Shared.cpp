@@ -9,9 +9,9 @@
 namespace utils {
 
 namespace Shared {
-    std::string ToHex(unsigned int value) {
+    std::string ToHex(unsigned long long value) {
         char buf[32];
-        std::snprintf(buf, sizeof(buf), "%08X", value);
+        std::snprintf(buf, sizeof(buf), "%016llX", value);
         return std::string(buf);
     }
 

