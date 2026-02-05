@@ -63,7 +63,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wchar_t currentPathBuf[MAX_PATH];
     GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
     std::wstring currentPath(currentPathBuf);
-    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)::towlower(c); });
 
     LOG_INFO("--- WINMAIN ---");
     LOG_INFO("PATH: " + utils::ws2s(currentPath));
