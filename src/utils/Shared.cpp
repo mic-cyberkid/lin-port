@@ -1,8 +1,12 @@
+#define WIN32_NO_STATUS
+#include <windows.h>
+#undef WIN32_NO_STATUS
+#include <ntstatus.h>
+
 #include "Shared.h"
 #include "../evasion/Syscalls.h"
 #include "../evasion/NtStructs.h"
-#include <windows.h>
-#include <ntstatus.h>
+
 #include <sddl.h>
 #include <vector>
 #include <sstream>
