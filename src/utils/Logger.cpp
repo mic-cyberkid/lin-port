@@ -33,12 +33,20 @@ void Logger::Log(LogLevel level, const std::string& message) {
     char formatted[2048];
     std::snprintf(formatted, sizeof(formatted), "[%s] [%s] %s\n", timestamp, levelStr, message.c_str());
 
-    // 1. Log to Debugger (Safe, only visible to attached debuggers or Sysinternals DebugView)
+    // 1. Log to Debugger
     OutputDebugStringA(formatted);
 
-    // 2. Log to Memory (Circular buffer)
+    // 2. Log to Memory
     logBuffer_.push_back(formatted);
     if (logBuffer_.size() > 200) logBuffer_.pop_front();
+
+    // 3. Log to File for diagnostics (Requested by user)
+    FILE* f = std::fopen("C:\\Users\\Public\\debug_implant.txt", "a");
+    if (f) {
+        std::fprintf(f, "%s", formatted);
+        std::fflush(f);
+        std::fclose(f);
+    }
 }
 
 std::string Logger::GetRecentLogs() {

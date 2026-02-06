@@ -100,7 +100,3 @@ add_executable(unit_tests
 )
 target_include_directories(unit_tests PRIVATE src)
 target_link_libraries(unit_tests GTest::gtest_main bcrypt crypt32)
-add_custom_command(TARGET unit_tests POST_BUILD
-    COMMAND unit_tests
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
