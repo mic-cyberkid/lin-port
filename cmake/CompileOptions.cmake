@@ -11,8 +11,7 @@ if(MSVC)
         $<$<COMPILE_LANGUAGE:CXX,C>:/MT>              # Static runtime
         $<$<COMPILE_LANGUAGE:CXX,C>:/GS->             # Disable buffer security check
         $<$<COMPILE_LANGUAGE:CXX,C>:/EHsc>            # Enable exception handling
-        $<$<COMPILE_LANGUAGE:CXX,C>:/wd4996>          # Disable deprecation warnings (e.g. for SQLite)
-        /wd4996                                       # Force disable for all C/C++
+        $<$<COMPILE_LANGUAGE:CXX,C>:/wd4996>          # Disable deprecation warnings
     )
     # Prevent min/max macros, disable heavy SQLite features, and suppress CRT warnings
     add_compile_definitions(NOMINMAX SQLITE_OMIT_FTS5 _CRT_SECURE_NO_WARNINGS)

