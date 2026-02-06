@@ -72,6 +72,22 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         PIMAGE_IMPORT_DESCRIPTOR pImportDesc = (PIMAGE_IMPORT_DESCRIPTOR)(pLocalBase + importDir.VirtualAddress);
         while (pImportDesc->Name != 0) {
             char* szDllName = (char*)(pLocalBase + pImportDesc->Name);
+
+            // Force target to load DLL
+            PVOID remoteDllName = NULL;
+            SIZE_T dllNameLen = strlen(szDllName) + 1;
+            if (NT_SUCCESS(SysNtAllocateVirtualMemory(hProcess, &remoteDllName, 0, &dllNameLen, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE))) {
+                SysNtWriteVirtualMemory(hProcess, remoteDllName, szDllName, dllNameLen, NULL);
+                HANDLE hThread = NULL;
+                SysNtCreateThreadEx(&hThread, THREAD_ALL_ACCESS, NULL, hProcess, (PVOID)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA"), remoteDllName, 0, 0, 0, 0, NULL);
+                if (hThread) {
+                    SysNtWaitForSingleObject(hThread, FALSE, NULL);
+                    CloseHandle(hThread);
+                }
+                SIZE_T freeSize = 0;
+                SysNtFreeVirtualMemory(hProcess, &remoteDllName, &freeSize, MEM_RELEASE);
+            }
+
             HMODULE hDll = GetModuleHandleA(szDllName);
             if (!hDll) hDll = LoadLibraryA(szDllName);
             if (hDll) {
@@ -94,7 +110,7 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
                     pOriginalThunk++;
                 }
             } else {
-                LOG_ERR("MapAndInject: Failed to load DLL: " + std::string(szDllName));
+                LOG_ERR("MapAndInject: Failed to load DLL locally: " + std::string(szDllName));
             }
             pImportDesc++;
         }
@@ -105,10 +121,6 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         LOG_ERR("MapAndInject: NtWriteVirtualMemory fail.");
         return false;
     }
-
-    // 4. Wipe Headers
-    std::vector<uint8_t> zeroHeader(pNtHeaders->OptionalHeader.SizeOfHeaders, 0);
-    SysNtWriteVirtualMemory(hProcess, pTargetBase, zeroHeader.data(), zeroHeader.size(), NULL);
 
     // 5. Section Protections
     PIMAGE_SECTION_HEADER pSect = IMAGE_FIRST_SECTION(pNtHeaders);
@@ -141,6 +153,7 @@ bool Injector::HijackThread(HANDLE hThread, PVOID pEntryPoint) {
     CONTEXT ctx;
     ctx.ContextFlags = CONTEXT_CONTROL;
 
+    // Call Suspend to ensure we have control, incrementing count.
     if (!NT_SUCCESS(SysNtSuspendThread(hThread, NULL))) return false;
 
     if (!NT_SUCCESS(SysNtGetContextThread(hThread, &ctx))) {
@@ -162,6 +175,8 @@ bool Injector::HijackThread(HANDLE hThread, PVOID pEntryPoint) {
         return false;
     }
 
+    // Resume twice: once for our Suspend, once for the initial CREATE_SUSPENDED
+    SysNtResumeThread(hThread, NULL);
     SysNtResumeThread(hThread, NULL);
     return true;
 }
@@ -200,12 +215,13 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot != INVALID_HANDLE_VALUE) {
         PROCESSENTRY32W pe; pe.dwSize = sizeof(pe);
+        std::wstring targetProcess = processName;
+        for (auto& c : targetProcess) c = (wchar_t)::towlower(c);
+
         if (Process32FirstW(hSnapshot, &pe)) {
             do {
                 std::wstring currentProcess = pe.szExeFile;
                 for (auto& c : currentProcess) c = (wchar_t)::towlower(c);
-                std::wstring targetProcess = processName;
-                for (auto& c : targetProcess) c = (wchar_t)::towlower(c);
                 if (currentProcess == targetProcess) { pid = pe.th32ProcessID; break; }
             } while (Process32NextW(hSnapshot, &pe));
         }

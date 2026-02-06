@@ -39,12 +39,14 @@ NTSTATUS SysNtSuspendThread(HANDLE ThreadHandle, PULONG PreviousSuspendCount);
 NTSTATUS SysNtGetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext);
 NTSTATUS SysNtSetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext);
 NTSTATUS SysNtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, PVOID ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList);
+NTSTATUS SysNtWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
+NTSTATUS SysNtFreeVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_T RegionSize, ULONG FreeType);
 
 } // namespace evasion
 
 // Helper for calling syscalls (requires assembly or gadget jump)
-// Prototype with maximum expected arguments to ensure caller allocates enough stack space.
+// Prototype with UINT_PTR to avoid pointer truncation warnings on x64
 extern "C" NTSTATUS InternalDoSyscall(DWORD ssn,
-    PVOID a1, PVOID a2, PVOID a3, PVOID a4,
-    PVOID a5, PVOID a6, PVOID a7, PVOID a8,
-    PVOID a9, PVOID a10, PVOID a11);
+    UINT_PTR a1, UINT_PTR a2, UINT_PTR a3, UINT_PTR a4,
+    UINT_PTR a5, UINT_PTR a6, UINT_PTR a7, UINT_PTR a8,
+    UINT_PTR a9, UINT_PTR a10, UINT_PTR a11);

