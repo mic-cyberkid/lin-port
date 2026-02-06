@@ -1,63 +1,21 @@
+#define WIN32_NO_STATUS
+#include <windows.h>
+#undef WIN32_NO_STATUS
+#include <ntstatus.h>
+
 #include "Shared.h"
 #include "../evasion/Syscalls.h"
 #include "../evasion/NtStructs.h"
+
 #include <sddl.h>
 #include <vector>
-#include <cstdio>
 #include <sstream>
+#include <iomanip>
 
 namespace utils {
 
-namespace Shared {
-    std::string ToHex(unsigned int value) {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "%08X", value);
-        return std::string(buf);
-    }
-
-    LONG NtCreateKeyRelative(HANDLE hRoot, const std::wstring& relativePath, PHANDLE hTarget) {
-        auto& resolver = evasion::SyscallResolver::GetInstance();
-        DWORD ntCreateKeySsn = resolver.GetServiceNumber("NtCreateKey");
-        DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
-
-        if (ntCreateKeySsn == 0xFFFFFFFF || ntCloseSsn == 0xFFFFFFFF) return (LONG)0xC0000001;
-
-        std::wstringstream ss(relativePath);
-        std::wstring segment;
-        HANDLE hParent = hRoot;
-        HANDLE hNew = NULL;
-        NTSTATUS status = 0;
-
-        while (std::getline(ss, segment, L'\\')) {
-            if (segment.empty()) continue;
-
-            UNICODE_STRING uSegment;
-            uSegment.Buffer = (PWSTR)segment.c_str();
-            uSegment.Length = (USHORT)(segment.length() * sizeof(wchar_t));
-            uSegment.MaximumLength = uSegment.Length + sizeof(wchar_t);
-
-            OBJECT_ATTRIBUTES objAttr;
-            InitializeObjectAttributes(&objAttr, &uSegment, OBJ_CASE_INSENSITIVE, hParent, NULL);
-
-            ULONG disp = 0;
-            status = InternalDoSyscall(ntCreateKeySsn, &hNew, (PVOID)(UINT_PTR)KEY_ALL_ACCESS, &objAttr, 0, NULL, 0, &disp, NULL, NULL, NULL, NULL);
-
-            // Close intermediate handle, but not the initial hRoot
-            if (hParent != hRoot && hParent != NULL) {
-                InternalDoSyscall(ntCloseSsn, hParent, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-            }
-
-            if (!NT_SUCCESS(status)) return (LONG)status;
-            hParent = hNew;
-        }
-
-        *hTarget = hParent;
-        return (LONG)status;
-    }
-}
-
 std::string ws2s(const std::wstring& wstr) {
-    if (wstr.empty()) return std::string();
+    if (wstr.empty()) return "";
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
     std::string strTo(size_needed, 0);
     WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
@@ -65,48 +23,91 @@ std::string ws2s(const std::wstring& wstr) {
 }
 
 std::wstring s2ws(const std::string& str) {
-    if (str.empty()) return std::wstring();
+    if (str.empty()) return L"";
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
-    std::wstring strTo(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &strTo[0], size_needed);
-    return strTo;
+    std::wstring wstrTo(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
+    return wstrTo;
 }
 
 std::wstring GetCurrentUserSid() {
     HANDLE hToken = NULL;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) return L"";
-
     DWORD dwSize = 0;
     GetTokenInformation(hToken, TokenUser, NULL, 0, &dwSize);
-    if (dwSize == 0) {
+    std::vector<BYTE> buffer(dwSize);
+    if (!GetTokenInformation(hToken, TokenUser, buffer.data(), dwSize, &dwSize)) {
         CloseHandle(hToken);
         return L"";
     }
-
-    std::vector<BYTE> buffer(dwSize);
     PTOKEN_USER pTokenUser = (PTOKEN_USER)buffer.data();
-
-    std::wstring sidStr = L"";
-    if (GetTokenInformation(hToken, TokenUser, pTokenUser, dwSize, &dwSize)) {
-        LPWSTR pSid = NULL;
-        if (ConvertSidToStringSidW(pTokenUser->User.Sid, &pSid)) {
-            sidStr = pSid;
-            LocalFree(pSid);
-        }
+    LPWSTR stringSid = NULL;
+    if (!ConvertSidToStringSidW(pTokenUser->User.Sid, &stringSid)) {
+        CloseHandle(hToken);
+        return L"";
     }
+    std::wstring sid(stringSid);
+    LocalFree(stringSid);
     CloseHandle(hToken);
-    return sidStr;
+    return sid;
 }
 
 bool IsAdmin() {
-    BOOL bIsAdmin = FALSE;
-    PSID pAdministratorsGroup = NULL;
-    SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
-    if (AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &pAdministratorsGroup)) {
-        CheckTokenMembership(NULL, pAdministratorsGroup, &bIsAdmin);
-        FreeSid(pAdministratorsGroup);
+    BOOL isAdmin = FALSE;
+    PSID adminGroup = NULL;
+    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+    if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &adminGroup)) {
+        CheckTokenMembership(NULL, adminGroup, &isAdmin);
+        FreeSid(adminGroup);
     }
-    return bIsAdmin == TRUE;
+    return isAdmin != FALSE;
 }
 
+namespace Shared {
+
+LONG NtCreateKeyRelative(HANDLE hParent, const std::wstring& relativePath, PHANDLE phKey) {
+    auto& resolver = evasion::SyscallResolver::GetInstance();
+    DWORD ntCreateKeySsn = resolver.GetServiceNumber("NtCreateKey");
+    DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
+    if (ntCreateKeySsn == 0xFFFFFFFF) return STATUS_NOT_IMPLEMENTED;
+
+    std::vector<std::wstring> components;
+    std::wstringstream ss(relativePath);
+    std::wstring item;
+    while (std::getline(ss, item, L'\\')) {
+        if (!item.empty()) components.push_back(item);
+    }
+
+    HANDLE hCurrent = hParent;
+    for (size_t i = 0; i < components.size(); ++i) {
+        UNICODE_STRING uName;
+        uName.Buffer = (PWSTR)components[i].c_str();
+        uName.Length = (USHORT)(components[i].length() * sizeof(wchar_t));
+        uName.MaximumLength = uName.Length + sizeof(wchar_t);
+
+        OBJECT_ATTRIBUTES objAttr;
+        InitializeObjectAttributes(&objAttr, &uName, OBJ_CASE_INSENSITIVE, hCurrent, NULL);
+
+        HANDLE hNext = NULL;
+        NTSTATUS status = InternalDoSyscall(ntCreateKeySsn, (UINT_PTR)&hNext, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&objAttr, 0, 0, (UINT_PTR)REG_OPTION_NON_VOLATILE, 0, 0, 0, 0, 0);
+
+        if (hCurrent != hParent) {
+            InternalDoSyscall(ntCloseSsn, (UINT_PTR)hCurrent, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        if (!NT_SUCCESS(status)) return status;
+        hCurrent = hNext;
+    }
+
+    *phKey = hCurrent;
+    return STATUS_SUCCESS;
+}
+
+std::string ToHex(unsigned long long val) {
+    std::stringstream ss;
+    ss << "0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(16) << val;
+    return ss.str();
+}
+
+} // namespace Shared
 } // namespace utils

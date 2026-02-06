@@ -9,7 +9,7 @@ namespace utils {
     bool IsAdmin();
 
     namespace Shared {
-        std::string ToHex(unsigned int value);
+        std::string ToHex(unsigned long long value);
         LONG NtCreateKeyRelative(HANDLE hRoot, const std::wstring& relativePath, PHANDLE hTarget);
     }
 }
