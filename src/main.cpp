@@ -11,7 +11,10 @@
 #include "utils/Logger.h"
 #include "utils/Shared.h"
 #include "utils/Obfuscator.h"
+#define WIN32_NO_STATUS
 #include <windows.h>
+#undef WIN32_NO_STATUS
+#include <ntstatus.h>
 #include <objbase.h>
 #include <vector>
 #include <algorithm>
