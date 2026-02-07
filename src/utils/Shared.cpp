@@ -69,7 +69,8 @@ LONG NtCreateKeyRelative(HANDLE hParent, const std::wstring& relativePath, PHAND
     auto& resolver = evasion::SyscallResolver::GetInstance();
     DWORD ntCreateKeySsn = resolver.GetServiceNumber("NtCreateKey");
     DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
-    if (ntCreateKeySsn == 0xFFFFFFFF) return STATUS_NOT_IMPLEMENTED;
+    PVOID gadget = resolver.GetSyscallGadget();
+    if (ntCreateKeySsn == 0xFFFFFFFF || !gadget) return STATUS_NOT_IMPLEMENTED;
 
     std::vector<std::wstring> components;
     std::wstringstream ss(relativePath);
@@ -89,10 +90,10 @@ LONG NtCreateKeyRelative(HANDLE hParent, const std::wstring& relativePath, PHAND
         InitializeObjectAttributes(&objAttr, &uName, OBJ_CASE_INSENSITIVE, hCurrent, NULL);
 
         HANDLE hNext = NULL;
-        NTSTATUS status = InternalDoSyscall(ntCreateKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hNext, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&objAttr, 0, 0, (UINT_PTR)REG_OPTION_NON_VOLATILE, 0, 0, 0, 0, 0);
+        NTSTATUS status = InternalDoSyscall(ntCreateKeySsn, gadget, (UINT_PTR)&hNext, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&objAttr, 0, 0, (UINT_PTR)REG_OPTION_NON_VOLATILE, 0, 0, 0, 0, 0);
 
         if (hCurrent != hParent) {
-            InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hCurrent, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            InternalDoSyscall(ntCloseSsn, gadget, (UINT_PTR)hCurrent, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
         if (!NT_SUCCESS(status)) return status;

@@ -4,6 +4,10 @@
 #include <string>
 #include <vector>
 
+#ifndef NT_SUCCESS
+#define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
+#endif
+
 namespace evasion {
 
 struct SyscallStub {

