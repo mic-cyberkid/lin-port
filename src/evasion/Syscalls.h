@@ -1,16 +1,8 @@
 #pragma once
-#define WIN32_NO_STATUS
-#include <windows.h>
-#undef WIN32_NO_STATUS
-#include <ntstatus.h>
-#include <winternl.h>
+#include "NtStructs.h"
 #include <map>
 #include <string>
 #include <vector>
-
-#ifndef NT_SUCCESS
-#define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
-#endif
 
 namespace evasion {
 

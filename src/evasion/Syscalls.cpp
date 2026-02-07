@@ -1,5 +1,4 @@
 #include "Syscalls.h"
-#include <winternl.h>
 #include <algorithm>
 
 namespace evasion {
