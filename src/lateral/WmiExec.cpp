@@ -43,7 +43,7 @@ std::string WmiExec(const std::string& target, const std::string& user, const st
         }
 
         // "ROOT\CIMV2" obfuscated
-        std::wstring ns = utils::xor_wstr(L"\x08\x15\x15\x0e\x06\x19\x13\x17\x0c\x68", 10);
+        std::wstring ns = utils::xor_wstr(L"\x19\x50\xc3\x6a\x17\x5c\xc5\x73\x1d\x2d", 10);
         if (!wmi.ConnectRemote(wtarget, username, domain, wpass, ns)) {
             return "ERROR: ConnectRemote failed";
         }

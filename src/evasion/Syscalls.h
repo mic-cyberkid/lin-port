@@ -1,5 +1,5 @@
 #pragma once
-#include <windows.h>
+#include "NtStructs.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -41,12 +41,14 @@ NTSTATUS SysNtSetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext);
 NTSTATUS SysNtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, PVOID ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList);
 NTSTATUS SysNtWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
 NTSTATUS SysNtFreeVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_T RegionSize, ULONG FreeType);
+NTSTATUS SysNtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key);
+NTSTATUS SysNtClose(HANDLE Handle);
 
 } // namespace evasion
 
 // Helper for calling syscalls (requires assembly or gadget jump)
 // Prototype with UINT_PTR to avoid pointer truncation warnings on x64
-extern "C" NTSTATUS InternalDoSyscall(DWORD ssn,
+extern "C" NTSTATUS InternalDoSyscall(DWORD ssn, PVOID gadget,
     UINT_PTR a1, UINT_PTR a2, UINT_PTR a3, UINT_PTR a4,
     UINT_PTR a5, UINT_PTR a6, UINT_PTR a7, UINT_PTR a8,
     UINT_PTR a9, UINT_PTR a10, UINT_PTR a11);

