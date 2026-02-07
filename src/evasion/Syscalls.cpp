@@ -200,4 +200,20 @@ NTSTATUS SysNtFreeVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_
     return InternalDoSyscall(ssn, gadget, (UINT_PTR)ProcessHandle, (UINT_PTR)BaseAddress, (UINT_PTR)RegionSize, (UINT_PTR)FreeType, 0, 0, 0, 0, 0, 0, 0);
 }
 
+NTSTATUS SysNtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtWriteFile");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)FileHandle, (UINT_PTR)Event, (UINT_PTR)ApcRoutine, (UINT_PTR)ApcContext, (UINT_PTR)IoStatusBlock, (UINT_PTR)Buffer, (UINT_PTR)Length, (UINT_PTR)ByteOffset, (UINT_PTR)Key, 0, 0);
+}
+
+NTSTATUS SysNtClose(HANDLE Handle) {
+    auto& res = SyscallResolver::GetInstance();
+    DWORD ssn = res.GetServiceNumber("NtClose");
+    PVOID gadget = res.GetSyscallGadget();
+    if (ssn == 0xFFFFFFFF || !gadget) return 0xC0000001;
+    return InternalDoSyscall(ssn, gadget, (UINT_PTR)Handle, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+}
+
 } // namespace evasion

