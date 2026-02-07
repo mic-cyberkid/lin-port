@@ -92,7 +92,7 @@ LONG NtCreateKeyRelative(HANDLE hParent, const std::wstring& relativePath, PHAND
         NTSTATUS status = InternalDoSyscall(ntCreateKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hNext, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&objAttr, 0, 0, (UINT_PTR)REG_OPTION_NON_VOLATILE, 0, 0, 0, 0, 0);
 
         if (hCurrent != hParent) {
-            InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hCurrent, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hCurrent, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
         if (!NT_SUCCESS(status)) return status;

