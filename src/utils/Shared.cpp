@@ -68,7 +68,6 @@ namespace Shared {
 LONG NtCreateKeyRelative(HANDLE hParent, const std::wstring& relativePath, PHANDLE phKey) {
     auto& resolver = evasion::SyscallResolver::GetInstance();
     DWORD ntCreateKeySsn = resolver.GetServiceNumber("NtCreateKey");
-    DWORD ntCloseSsn = resolver.GetServiceNumber("NtClose");
     PVOID gadget = resolver.GetSyscallGadget();
     if (ntCreateKeySsn == 0xFFFFFFFF || !gadget) return STATUS_NOT_IMPLEMENTED;
 
