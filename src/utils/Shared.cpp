@@ -94,7 +94,7 @@ bool SetPrivilege(LPCWSTR lpszPrivilege, BOOL bEnablePrivilege) {
 }
 
 bool ImpersonateLoggedOnUser() {
-    SetPrivilege(SE_DEBUG_NAME, TRUE);
+    SetPrivilege(L"SeDebugPrivilege", TRUE);
 
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) return false;
