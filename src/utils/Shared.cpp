@@ -64,7 +64,38 @@ bool IsAdmin() {
     return isAdmin != FALSE;
 }
 
+bool SetPrivilege(LPCWSTR lpszPrivilege, BOOL bEnablePrivilege) {
+    TOKEN_PRIVILEGES tp;
+    LUID luid;
+    HANDLE hToken;
+
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) return FALSE;
+    if (!LookupPrivilegeValueW(NULL, lpszPrivilege, &luid)) {
+        CloseHandle(hToken);
+        return FALSE;
+    }
+
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Luid = luid;
+    tp.Privileges[0].Attributes = (bEnablePrivilege) ? SE_PRIVILEGE_ENABLED : 0;
+
+    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL)) {
+        CloseHandle(hToken);
+        return FALSE;
+    }
+
+    if (GetLastError() == ERROR_NOT_ALL_ASSIGNED) {
+        CloseHandle(hToken);
+        return FALSE;
+    }
+
+    CloseHandle(hToken);
+    return TRUE;
+}
+
 bool ImpersonateLoggedOnUser() {
+    SetPrivilege(SE_DEBUG_NAME, TRUE);
+
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) return false;
 
@@ -72,13 +103,37 @@ bool ImpersonateLoggedOnUser() {
     pe.dwSize = sizeof(pe);
 
     DWORD explorerPid = 0;
+    DWORD activeSessionId = WTSGetActiveConsoleSessionId();
+
     if (Process32FirstW(hSnapshot, &pe)) {
         do {
             if (wcscmp(pe.szExeFile, L"explorer.exe") == 0) {
-                explorerPid = pe.th32ProcessID;
-                break;
+                DWORD sessionID = 0;
+                if (ProcessIdToSessionId(pe.th32ProcessID, &sessionID)) {
+                    if (sessionID == activeSessionId && sessionID != 0xFFFFFFFF) {
+                         explorerPid = pe.th32ProcessID;
+                         break;
+                    }
+                }
             }
         } while (Process32NextW(hSnapshot, &pe));
+    }
+
+    // Fallback: search for any sihost.exe or taskhostw.exe in active session if explorer not found
+    if (explorerPid == 0) {
+        if (Process32FirstW(hSnapshot, &pe)) {
+            do {
+                if (wcscmp(pe.szExeFile, L"sihost.exe") == 0 || wcscmp(pe.szExeFile, L"taskhostw.exe") == 0) {
+                    DWORD sessionID = 0;
+                    if (ProcessIdToSessionId(pe.th32ProcessID, &sessionID)) {
+                        if (sessionID == activeSessionId && sessionID != 0xFFFFFFFF) {
+                            explorerPid = pe.th32ProcessID;
+                            break;
+                        }
+                    }
+                }
+            } while (Process32NextW(hSnapshot, &pe));
+        }
     }
     CloseHandle(hSnapshot);
 
@@ -88,7 +143,7 @@ bool ImpersonateLoggedOnUser() {
     if (!hProcess) return false;
 
     HANDLE hToken = NULL;
-    if (OpenProcessToken(hProcess, TOKEN_DUPLICATE, &hToken)) {
+    if (OpenProcessToken(hProcess, TOKEN_DUPLICATE | TOKEN_QUERY, &hToken)) {
         HANDLE hDupToken = NULL;
         if (DuplicateTokenEx(hToken, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDupToken)) {
             if (SetThreadToken(NULL, hDupToken)) {
