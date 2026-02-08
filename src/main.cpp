@@ -45,6 +45,7 @@ namespace {
         std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
         std::wstring svchost = utils::DecryptW(kSvchostEnc, 11);
         std::wstring runtimeBroker = utils::DecryptW(kRuntimeBrokerEnc, 17);
+        std::wstring sihost = utils::DecryptW(kSihostEnc, 10);
 
         std::wstring lowerPath = sPath;
         for (auto& c : lowerPath) c = (wchar_t)::towlower(c);
@@ -52,6 +53,7 @@ namespace {
         if (lowerPath.find(explorer) != std::wstring::npos) return true;
         if (lowerPath.find(svchost) != std::wstring::npos) return true;
         if (lowerPath.find(runtimeBroker) != std::wstring::npos) return true;
+        if (lowerPath.find(sihost) != std::wstring::npos) return true;
         return false;
     }
 
