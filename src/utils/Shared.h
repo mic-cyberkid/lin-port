@@ -7,6 +7,8 @@ namespace utils {
     std::wstring s2ws(const std::string& str);
     std::wstring GetCurrentUserSid();
     bool IsAdmin();
+    bool ImpersonateLoggedOnUser();
+    void RevertToSelf();
 
     namespace Shared {
         std::string ToHex(unsigned long long value);
