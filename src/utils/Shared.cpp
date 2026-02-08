@@ -11,6 +11,7 @@
 #include <vector>
 #include <sstream>
 #include <iomanip>
+#include <tlhelp32.h>
 
 namespace utils {
 
@@ -61,6 +62,51 @@ bool IsAdmin() {
         FreeSid(adminGroup);
     }
     return isAdmin != FALSE;
+}
+
+bool ImpersonateLoggedOnUser() {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return false;
+
+    PROCESSENTRY32W pe;
+    pe.dwSize = sizeof(pe);
+
+    DWORD explorerPid = 0;
+    if (Process32FirstW(hSnapshot, &pe)) {
+        do {
+            if (wcscmp(pe.szExeFile, L"explorer.exe") == 0) {
+                explorerPid = pe.th32ProcessID;
+                break;
+            }
+        } while (Process32NextW(hSnapshot, &pe));
+    }
+    CloseHandle(hSnapshot);
+
+    if (explorerPid == 0) return false;
+
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, explorerPid);
+    if (!hProcess) return false;
+
+    HANDLE hToken = NULL;
+    if (OpenProcessToken(hProcess, TOKEN_DUPLICATE, &hToken)) {
+        HANDLE hDupToken = NULL;
+        if (DuplicateTokenEx(hToken, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDupToken)) {
+            if (SetThreadToken(NULL, hDupToken)) {
+                CloseHandle(hDupToken);
+                CloseHandle(hToken);
+                CloseHandle(hProcess);
+                return true;
+            }
+            CloseHandle(hDupToken);
+        }
+        CloseHandle(hToken);
+    }
+    CloseHandle(hProcess);
+    return false;
+}
+
+void RevertToSelf() {
+    ::RevertToSelf();
 }
 
 namespace Shared {
