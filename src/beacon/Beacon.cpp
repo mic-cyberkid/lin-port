@@ -44,6 +44,9 @@ namespace {
         if (str == "dump_lsass") return beacon::TaskType::DUMP_LSASS;
         if (str == "lateral_rce") return beacon::TaskType::LATERAL_RCE;
         if (str == "lateral_wireless") return beacon::TaskType::LATERAL_WIRELESS;
+        if (str == "lateral_svc") return beacon::TaskType::LATERAL_SVC;
+        if (str == "lateral_task") return beacon::TaskType::LATERAL_TASK;
+        if (str == "ad_enum") return beacon::TaskType::AD_ENUM;
         if (str == "get_logs") return beacon::TaskType::GET_LOGS;
         // Add other mappings here
         return beacon::TaskType::UNKNOWN;
