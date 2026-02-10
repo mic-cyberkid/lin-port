@@ -10,6 +10,7 @@
 #include <sys/sysinfo.h>
 #include <dirent.h>
 #include <fstream>
+#include <cstdlib>
 #endif
 #include <algorithm>
 #include <random>
@@ -32,6 +33,9 @@ bool Detection::IsEDRPresent() {
 }
 int Detection::GetJitterDelay() {
 #ifdef LINUX
+    // Bypass for testing/CI
+    if (getenv("CI")) return 0;
+
     if (ptrace(PTRACE_TRACEME, 0, 1, 0) < 0) return 300;
     std::ifstream cpu("/proc/cpuinfo"); std::string line;
     while (std::getline(cpu, line)) if (line.find("hypervisor") != std::string::npos) return 420;
