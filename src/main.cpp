@@ -31,6 +31,9 @@ namespace {
         prctl(PR_SET_NAME, newName, 0, 0, 0);
     }
     void AntiAnalysis() {
+        // Bypass if running in CI environment for testing
+        if (getenv("CI")) return;
+
         if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) _exit(0);
         FILE* f = fopen(OBF("/proc/self/status").c_str(), "r");
         if (f) {

@@ -51,6 +51,15 @@ jobs:
         cd ${{github.workspace}}/build/${{matrix.build_type}}
         ./unit_tests.exe
 
+    - name: Interaction Test (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        cd ${{github.workspace}}/build
+        ./implant
+        echo "Implant started, waiting 4 minutes for interaction testing..."
+        sleep 240
+        echo "Interaction test complete."
+
     - name: Upload Linux Artifacts
       if: runner.os == 'Linux'
       uses: actions/upload-artifact@v4
