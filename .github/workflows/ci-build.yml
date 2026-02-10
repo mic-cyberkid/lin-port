@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-22.04, windows-latest]
         build_type: [Release]
 
     steps:
@@ -55,8 +55,8 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         cd ${{github.workspace}}/build
-        ./implant
-        echo "Implant started, waiting 4 minutes for interaction testing..."
+        ./implant &
+        echo "Implant started in background, waiting 4 minutes for interaction testing..."
         sleep 240
         echo "Interaction test complete."
 

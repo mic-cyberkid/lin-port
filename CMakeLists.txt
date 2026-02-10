@@ -117,6 +117,8 @@ else()
         ${OPENSSL_INCLUDE_DIR}
         ${X11_INCLUDE_DIRS}
     )
+    # Statically link libstdc++ and libgcc for better compatibility
+    target_link_options(implant PRIVATE -static-libgcc -static-libstdc++)
     target_link_libraries(implant
         nlohmann_json::nlohmann_json
         OpenSSL::SSL
@@ -141,5 +143,6 @@ target_include_directories(unit_tests PRIVATE src)
 if(WIN32)
     target_link_libraries(unit_tests GTest::gtest_main bcrypt crypt32)
 else()
+    target_link_options(unit_tests PRIVATE -static-libgcc -static-libstdc++)
     target_link_libraries(unit_tests GTest::gtest_main OpenSSL::Crypto pthread)
 endif()
