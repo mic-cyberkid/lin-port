@@ -24,11 +24,22 @@ namespace utils {
 
     #define OBF(str) []() { static constexpr utils::ObfString<sizeof(str)> obf(str); return obf.decrypt(); }()
 
-    inline std::wstring DecryptW(const wchar_t* enc, size_t len) {
-        std::wstring out;
+    inline std::wstring xor_wstr(const wchar_t* str, size_t len) {
+        std::wstring out(str, len);
         const uint8_t key[] = { 0x4B, 0x1F, 0x8C, 0x3E };
-        for (size_t i = 0; i < len; i++) out += (wchar_t)(enc[i] ^ (wchar_t)key[i % 4]);
+        for (size_t i = 0; i < len; i++) out[i] ^= (wchar_t)key[i % 4];
         return out;
+    }
+
+    inline std::string xor_str(const char* str, size_t len) {
+        std::string out(str, len);
+        const uint8_t key[] = { 0x4B, 0x1F, 0x8C, 0x3E };
+        for (size_t i = 0; i < len; i++) out[i] ^= (char)key[i % 4];
+        return out;
+    }
+
+    inline std::wstring DecryptW(const wchar_t* enc, size_t len) {
+        return xor_wstr(enc, len);
     }
 
     inline std::string DecryptA(const std::string& enc) {

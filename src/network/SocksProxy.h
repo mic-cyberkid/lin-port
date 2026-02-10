@@ -5,6 +5,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+typedef int SOCKET;
+#define INVALID_SOCKET -1
 #endif
 #include <string>
 #include <atomic>
@@ -24,7 +26,7 @@ public:
 private:
     std::atomic<bool> isRunning_;
     std::thread proxyThread_;
-    int listenSocket_;
+    SOCKET listenSocket_;
 
     void ProxyLoop(int port);
 };

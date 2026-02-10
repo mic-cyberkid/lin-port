@@ -28,7 +28,6 @@ std::string ws2s(const std::wstring& wstr) {
     WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
     return strTo;
 #else
-    // Simplified conversion for Linux v1.0
     std::string s;
     for (wchar_t wc : wstr) s += (char)wc;
     return s;
@@ -43,7 +42,6 @@ std::wstring s2ws(const std::string& str) {
     MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
     return wstrTo;
 #else
-    // Simplified conversion for Linux v1.0
     std::wstring ws;
     for (char c : str) ws += (wchar_t)c;
     return ws;
@@ -109,6 +107,7 @@ namespace Shared {
 
 #ifdef _WIN32
 LONG NtCreateKeyRelative(HANDLE hParent, const std::wstring& relativePath, PHANDLE phKey) {
+    (void)hParent; (void)relativePath; (void)phKey;
     return 0;
 }
 #endif

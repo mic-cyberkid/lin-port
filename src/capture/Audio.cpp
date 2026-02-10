@@ -13,6 +13,7 @@
 #endif
 namespace capture {
     std::vector<BYTE> RecordAudio(int seconds) {
+        (void)seconds;
 #ifdef _WIN32
         return {};
 #else

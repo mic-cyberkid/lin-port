@@ -1,12 +1,10 @@
 #include "SocksProxy.h"
 #include <vector>
 #include <thread>
+#include <cstring>
 #ifndef _WIN32
 #include <unistd.h>
 #include <netdb.h>
-#include <cstring>
-#define SOCKET int
-#define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define closesocket close
 #define SD_RECEIVE SHUT_RD
@@ -78,7 +76,6 @@ void SocksProxy::ProxyLoop(int port) {
             if (isRunning_) std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
-        // Handle client logic here (stubbed for brevity in this porting effort)
         closesocket(client);
     }
 }
