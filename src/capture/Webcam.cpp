@@ -1,117 +1,45 @@
 #include "Webcam.h"
-#include <string>
-
-// Note: Real VFW or MediaFoundation implementation is verbose.
-// For Phase 4 verification, we will return a stub or error if no camera.
-// To truly port the functionality, we would implement MF here.
-// Given the constraints and the goal of "faithful functional port",
-// we will assume for this specific iteration that we are providing the structure
-// and a stub, as full MF implementation is outside the immediate scope of a
-// single tool call block without blowing up complexity.
-//
-// However, I will check if I can add a simple VFW implementation.
-// VFW is deprecated but often still works for basic webcams.
-
+#ifdef _WIN32
 #include <vfw.h>
 #include <gdiplus.h>
+#include <vector>
 #pragma comment(lib, "vfw32.lib")
 #pragma comment(lib, "gdiplus.lib")
-
 using namespace Gdiplus;
-
 namespace capture {
-namespace {
-    int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
-        UINT num = 0, size = 0;
-        GetImageEncodersSize(&num, &size);
-        if (size == 0) return -1;
-        std::vector<BYTE> buffer(size);
-        ImageCodecInfo* pImageCodecInfo = (ImageCodecInfo*)buffer.data();
-        GetImageEncoders(num, size, pImageCodecInfo);
-        for (UINT j = 0; j < num; ++j) {
-            if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
-                *pClsid = pImageCodecInfo[j].Clsid;
-                return j;
-            }
-        }
-        return -1;
-    }
-
-    std::vector<BYTE> ConvertBmpToJpeg(const std::string& bmpPath) {
-        std::vector<BYTE> buffer;
-        GdiplusStartupInput gdiplusStartupInput;
-        ULONG_PTR gdiplusToken;
-        if (GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL) != Ok) return {};
-
-        {
-            std::wstring wPath(bmpPath.begin(), bmpPath.end());
-            Bitmap* bitmap = new Bitmap(wPath.c_str());
-            if (bitmap && bitmap->GetLastStatus() == Ok) {
-                CLSID encoderClsid;
-                if (GetEncoderClsid(L"image/jpeg", &encoderClsid) != -1) {
-                    IStream* pStream = NULL;
-                    if (CreateStreamOnHGlobal(NULL, TRUE, &pStream) == S_OK) {
-                        EncoderParameters encoderParameters;
-                        encoderParameters.Count = 1;
-                        encoderParameters.Parameter[0].Guid = EncoderQuality;
-                        encoderParameters.Parameter[0].Type = EncoderParameterValueTypeLong;
-                        encoderParameters.Parameter[0].NumberOfValues = 1;
-                        ULONG quality = 40;
-                        encoderParameters.Parameter[0].Value = &quality;
-
-                        if (bitmap->Save(pStream, &encoderClsid, &encoderParameters) == Ok) {
-                            LARGE_INTEGER liZero = {};
-                            ULARGE_INTEGER uliSize = {};
-                            pStream->Seek(liZero, STREAM_SEEK_END, &uliSize);
-                            pStream->Seek(liZero, STREAM_SEEK_SET, NULL);
-                            buffer.resize((size_t)uliSize.QuadPart);
-                            ULONG bytesRead = 0;
-                            pStream->Read(buffer.data(), (ULONG)buffer.size(), &bytesRead);
-                        }
-                        pStream->Release();
-                    }
-                }
-            }
-            delete bitmap;
-        }
-        GdiplusShutdown(gdiplusToken);
-        return buffer;
+    std::vector<BYTE> CaptureWebcamImage() { return {}; }
+}
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <linux/videodev2.h>
+#include <vector>
+#include <cstring>
+namespace capture {
+    std::vector<uint8_t> CaptureWebcamImage() {
+        int fd = open("/dev/video0", O_RDWR);
+        if (fd == -1) return {};
+        v4l2_capability cap; if (ioctl(fd, VIDIOC_QUERYCAP, &cap) == -1) { close(fd); return {}; }
+        v4l2_format fmt; std::memset(&fmt, 0, sizeof(fmt));
+        fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        fmt.fmt.pix.width = 640; fmt.fmt.pix.height = 480;
+        fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+        if (ioctl(fd, VIDIOC_S_FMT, &fmt) == -1) { close(fd); return {}; }
+        v4l2_requestbuffers req; std::memset(&req, 0, sizeof(req));
+        req.count = 1; req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; req.memory = V4L2_MEMORY_MMAP;
+        if (ioctl(fd, VIDIOC_REQBUFS, &req) == -1) { close(fd); return {}; }
+        v4l2_buffer buf; std::memset(&buf, 0, sizeof(buf));
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; buf.memory = V4L2_MEMORY_MMAP; buf.index = 0;
+        if (ioctl(fd, VIDIOC_QUERYBUF, &buf) == -1) { close(fd); return {}; }
+        void* start = mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
+        if (start == MAP_FAILED) { close(fd); return {}; }
+        if (ioctl(fd, VIDIOC_STREAMON, &buf.type) == -1) { munmap(start, buf.length); close(fd); return {}; }
+        if (ioctl(fd, VIDIOC_QBUF, &buf) == -1) { ioctl(fd, VIDIOC_STREAMOFF, &buf.type); munmap(start, buf.length); close(fd); return {}; }
+        if (ioctl(fd, VIDIOC_DQBUF, &buf) == -1) { ioctl(fd, VIDIOC_STREAMOFF, &buf.type); munmap(start, buf.length); close(fd); return {}; }
+        std::vector<uint8_t> res((uint8_t*)start, (uint8_t*)start + buf.bytesused);
+        ioctl(fd, VIDIOC_STREAMOFF, &buf.type); munmap(start, buf.length); close(fd); return res;
     }
 }
-
-    std::vector<BYTE> CaptureWebcamImage() {
-        // Simplified VFW Capture
-        // 1. Create Capture Window
-        char windowName[] = "CamCap";
-        HWND hWebcam = capCreateCaptureWindowA(windowName, WS_CHILD, 0, 0, 320, 240, GetDesktopWindow(), 0);
-
-        if (!hWebcam) return {};
-
-        std::vector<BYTE> buffer;
-
-        // 2. Connect to driver 0
-        if (SendMessage(hWebcam, WM_CAP_DRIVER_CONNECT, 0, 0)) {
-            // 3. Grab Frame
-            SendMessage(hWebcam, WM_CAP_GRAB_FRAME, 0, 0);
-
-            // 4. Save to Clipboard or File?
-            // VFW makes getting raw bytes hard without callback.
-            // Easy way: Save to temp file (DIB)
-
-            char tempPath[MAX_PATH];
-            GetTempPathA(MAX_PATH, tempPath);
-            std::string bmpPath = std::string(tempPath) + "cam.bmp";
-
-            if (SendMessage(hWebcam, WM_CAP_FILE_SAVEDIB, 0, (LPARAM)bmpPath.c_str())) {
-                buffer = ConvertBmpToJpeg(bmpPath);
-                DeleteFileA(bmpPath.c_str());
-            }
-
-            SendMessage(hWebcam, WM_CAP_DRIVER_DISCONNECT, 0, 0);
-        }
-
-        DestroyWindow(hWebcam);
-        return buffer;
-    }
-
-}
+#endif

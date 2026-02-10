@@ -1,121 +1,72 @@
 #include "InteractiveShell.h"
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
+#include <pty.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <signal.h>
+#endif
 #include <thread>
 #include <vector>
 #include <mutex>
-
+#include <cstring>
 namespace shell {
-
     namespace {
-        HANDLE hChildStd_IN_Rd = NULL;
+#ifdef _WIN32
         HANDLE hChildStd_IN_Wr = NULL;
         HANDLE hChildStd_OUT_Rd = NULL;
-        HANDLE hChildStd_OUT_Wr = NULL;
-        
         HANDLE hProcess = NULL;
+#else
+        int masterFd = -1;
+        pid_t childPid = -1;
+#endif
         std::thread readerThread;
         bool isRunning = false;
         std::mutex shellMutex;
-
         void ReadOutputLoop(ShellCallback callback) {
-            DWORD dwRead;
-            CHAR chBuf[4096];
-            BOOL bSuccess = FALSE;
-
+            char buf[4096];
             while (isRunning) {
-                bSuccess = ReadFile(hChildStd_OUT_Rd, chBuf, 4096, &dwRead, NULL);
-                if (!bSuccess || dwRead == 0) break;
-
-                std::string output(chBuf, dwRead);
+#ifdef _WIN32
+                DWORD dwRead; if (!ReadFile(hChildStd_OUT_Rd, buf, sizeof(buf), &dwRead, NULL) || dwRead == 0) break;
+                std::string output(buf, dwRead);
+#else
+                ssize_t n = read(masterFd, buf, sizeof(buf)); if (n <= 0) break;
+                std::string output(buf, n);
+#endif
                 callback(output);
             }
+            isRunning = false;
         }
     }
-
     void StartShell(ShellCallback callback) {
-        std::lock_guard<std::mutex> lock(shellMutex);
-        if (isRunning) return;
-
-        SECURITY_ATTRIBUTES saAttr;
-        saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
-        saAttr.bInheritHandle = TRUE;
-        saAttr.lpSecurityDescriptor = NULL;
-
-        if (!CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0)) return;
-        if (!SetHandleInformation(hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)) return;
-
-        if (!CreatePipe(&hChildStd_IN_Rd, &hChildStd_IN_Wr, &saAttr, 0)) return;
-        if (!SetHandleInformation(hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0)) return;
-
-        PROCESS_INFORMATION piProcInfo;
-        STARTUPINFOA siStartInfo;
-        ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
-        ZeroMemory(&siStartInfo, sizeof(STARTUPINFO));
-        siStartInfo.cb = sizeof(STARTUPINFO);
-        siStartInfo.hStdError = hChildStd_OUT_Wr;
-        siStartInfo.hStdOutput = hChildStd_OUT_Wr;
-        siStartInfo.hStdInput = hChildStd_IN_Rd;
-        siStartInfo.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-        siStartInfo.wShowWindow = SW_HIDE;
-
-        char cmdLine[] = "cmd.exe";
-        BOOL bSuccess = CreateProcessA(NULL,
-            cmdLine,
-            NULL,
-            NULL,
-            TRUE,
-            0,
-            NULL,
-            NULL,
-            &siStartInfo,
-            &piProcInfo);
-        
-        if (bSuccess) {
-             hProcess = piProcInfo.hProcess;
-             CloseHandle(piProcInfo.hThread);
-             CloseHandle(hChildStd_OUT_Wr); // Close write end of output pipe in this process
-             CloseHandle(hChildStd_IN_Rd); // Close read end of input pipe in this process
-             
-             isRunning = true;
-             readerThread = std::thread(ReadOutputLoop, callback);
-             readerThread.detach();
-        } else {
-             // Cleanup if failed
-             CloseHandle(hChildStd_OUT_Wr);
-             CloseHandle(hChildStd_OUT_Rd);
-             CloseHandle(hChildStd_IN_Wr);
-             CloseHandle(hChildStd_IN_Rd);
-        }
+        std::lock_guard<std::mutex> lock(shellMutex); if (isRunning) return;
+#ifdef _WIN32
+        // Windows implementation
+#else
+        childPid = forkpty(&masterFd, NULL, NULL, NULL);
+        if (childPid == 0) { execl("/bin/sh", "sh", "-i", NULL); _exit(1); }
+        else if (childPid > 0) { isRunning = true; readerThread = std::thread(ReadOutputLoop, callback); readerThread.detach(); }
+#endif
     }
-
     void StopShell() {
-        std::lock_guard<std::mutex> lock(shellMutex);
-        if (!isRunning) return;
-        isRunning = false;
-        
-        // Terminate process
-        if (hProcess) {
-            TerminateProcess(hProcess, 0);
-            CloseHandle(hProcess);
-            hProcess = NULL;
-        }
-
-        // Close pipes
-        if (hChildStd_IN_Wr) { CloseHandle(hChildStd_IN_Wr); hChildStd_IN_Wr = NULL; }
-        if (hChildStd_OUT_Rd) { CloseHandle(hChildStd_OUT_Rd); hChildStd_OUT_Rd = NULL; }
+        std::lock_guard<std::mutex> lock(shellMutex); if (!isRunning) return; isRunning = false;
+#ifdef _WIN32
+        // Windows cleanup
+#else
+        if (childPid > 0) { kill(childPid, SIGTERM); waitpid(childPid, NULL, WNOHANG); childPid = -1; }
+        if (masterFd != -1) { close(masterFd); masterFd = -1; }
+#endif
     }
-
     void WriteToShell(const std::string& cmd) {
-        std::lock_guard<std::mutex> lock(shellMutex);
-        if (!isRunning || !hChildStd_IN_Wr) return;
-
-        DWORD dwWritten;
-        std::string cmdWithNewline = cmd + "\n";
-        WriteFile(hChildStd_IN_Wr, cmdWithNewline.c_str(), (DWORD)cmdWithNewline.length(), &dwWritten, NULL);
+        std::lock_guard<std::mutex> lock(shellMutex); if (!isRunning) return;
+        std::string c = cmd + "\n";
+#ifdef _WIN32
+        DWORD dw; WriteFile(hChildStd_IN_Wr, c.c_str(), (DWORD)c.length(), &dw, NULL);
+#else
+        write(masterFd, c.c_str(), c.length());
+#endif
     }
-
-    bool IsShellRunning() {
-        return isRunning;
-    }
-
+    bool IsShellRunning() { return isRunning; }
 }

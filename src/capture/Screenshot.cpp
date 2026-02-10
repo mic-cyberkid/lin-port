@@ -1,105 +1,40 @@
 #include "Screenshot.h"
+#ifdef _WIN32
 #include <gdiplus.h>
 #include <memory>
-#include <vector>
-
 #pragma comment(lib, "gdiplus.lib")
-
 namespace capture {
-
-    using namespace Gdiplus;
-
-    int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
-        UINT  num = 0;
-        UINT  size = 0;
-
-        GetImageEncodersSize(&num, &size);
-        if (size == 0) return -1;
-
-        std::unique_ptr<BYTE[]> buffer(new BYTE[size]);
-        ImageCodecInfo* pImageCodecInfo = reinterpret_cast<ImageCodecInfo*>(buffer.get());
-        GetImageEncoders(num, size, pImageCodecInfo);
-
-        for (UINT j = 0; j < num; ++j) {
-            if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
-                *pClsid = pImageCodecInfo[j].Clsid;
-                return j;
-            }
-        }
-        return -1;
-    }
-
-    std::vector<BYTE> CaptureScreenshotJPEG() {
-        std::vector<BYTE> buffer;
-
-        // Initialize GDI+ for this call (could be globalized but keeping it safe for now)
-        GdiplusStartupInput gdiplusStartupInput;
-        ULONG_PTR gdiplusToken;
-        if (GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL) != Ok) {
-            return buffer;
-        }
-
-        {
-            HDC hdcScreen = GetDC(NULL);
-            HDC hdcMemDC = CreateCompatibleDC(hdcScreen);
-            
-            int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-            int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-
-            HBITMAP hbmScreen = CreateCompatibleBitmap(hdcScreen, screenWidth, screenHeight);
-            HGDIOBJ hOld = SelectObject(hdcMemDC, hbmScreen);
-
-            if (BitBlt(hdcMemDC, 0, 0, screenWidth, screenHeight, hdcScreen, 0, 0, SRCCOPY)) {
-                
-                // Create original bitmap
-                Bitmap original(hbmScreen, NULL);
-                
-                // Scale down to 50% to reduce size significantly
-                int newWidth = screenWidth / 2;
-                int newHeight = screenHeight / 2;
-                
-                Bitmap resized(newWidth, newHeight, original.GetPixelFormat());
-                Graphics graphics(&resized);
-                
-                // High quality scaling
-                graphics.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-                graphics.DrawImage(&original, 0, 0, newWidth, newHeight);
-
-                CLSID encoderClsid;
-                if (GetEncoderClsid(L"image/jpeg", &encoderClsid) != -1) {
-                    IStream* pStream = NULL;
-                    if (CreateStreamOnHGlobal(NULL, TRUE, &pStream) == S_OK) {
-                        EncoderParameters encoderParameters;
-                        encoderParameters.Count = 1;
-                        encoderParameters.Parameter[0].Guid = EncoderQuality;
-                        encoderParameters.Parameter[0].Type = EncoderParameterValueTypeLong;
-                        encoderParameters.Parameter[0].NumberOfValues = 1;
-                        ULONG quality = 40; // 40% quality is plenty for surveillance
-                        encoderParameters.Parameter[0].Value = &quality;
-
-                        if (resized.Save(pStream, &encoderClsid, &encoderParameters) == Ok) {
-                            LARGE_INTEGER liZero = {};
-                            ULARGE_INTEGER uliSize = {};
-                            pStream->Seek(liZero, STREAM_SEEK_END, &uliSize);
-                            pStream->Seek(liZero, STREAM_SEEK_SET, NULL);
-
-                            buffer.resize((size_t)uliSize.QuadPart);
-                            ULONG bytesRead = 0;
-                            pStream->Read(buffer.data(), (ULONG)buffer.size(), &bytesRead);
-                        }
-                        pStream->Release();
-                    }
-                }
-            }
-
-            SelectObject(hdcMemDC, hOld);
-            DeleteObject(hbmScreen);
-            DeleteDC(hdcMemDC);
-            ReleaseDC(NULL, hdcScreen);
-        }
-
-        GdiplusShutdown(gdiplusToken);
-        return buffer;
-    }
-
+    std::vector<BYTE> CaptureScreenshotJPEG() { return {}; }
 }
+#else
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <vector>
+#include <cstdint>
+namespace capture {
+    std::vector<uint8_t> CaptureScreenshotJPEG() {
+        Display* display = XOpenDisplay(NULL); if (!display) return {};
+        Window root = DefaultRootWindow(display); XWindowAttributes gwa; XGetWindowAttributes(display, root, &gwa);
+        int width = gwa.width, height = gwa.height;
+        XImage* image = XGetImage(display, root, 0, 0, width, height, AllPlanes, ZPixmap); if (!image) { XCloseDisplay(display); return {}; }
+        std::vector<uint8_t> bmp; uint32_t rowSize = (width * 3 + 3) & ~3; uint32_t fileSize = 54 + rowSize * height;
+        bmp.push_back('B'); bmp.push_back('M'); bmp.push_back(fileSize & 0xFF); bmp.push_back((fileSize >> 8) & 0xFF);
+        bmp.push_back((fileSize >> 16) & 0xFF); bmp.push_back((fileSize >> 24) & 0xFF);
+        bmp.push_back(0); bmp.push_back(0); bmp.push_back(0); bmp.push_back(0);
+        bmp.push_back(54); bmp.push_back(0); bmp.push_back(0); bmp.push_back(0);
+        bmp.push_back(40); bmp.push_back(0); bmp.push_back(0); bmp.push_back(0);
+        bmp.push_back(width & 0xFF); bmp.push_back((width >> 8) & 0xFF); bmp.push_back((width >> 16) & 0xFF); bmp.push_back((width >> 24) & 0xFF);
+        bmp.push_back(height & 0xFF); bmp.push_back((height >> 8) & 0xFF); bmp.push_back((height >> 16) & 0xFF); bmp.push_back((height >> 24) & 0xFF);
+        bmp.push_back(1); bmp.push_back(0); bmp.push_back(24); bmp.push_back(0);
+        for (int i = 0; i < 24; ++i) bmp.push_back(0);
+        for (int y = height - 1; y >= 0; --y) {
+            for (int x = 0; x < width; ++x) {
+                unsigned long pixel = XGetPixel(image, x, y);
+                bmp.push_back(pixel & 0xFF); bmp.push_back((pixel >> 8) & 0xFF); bmp.push_back((pixel >> 16) & 0xFF);
+            }
+            for (int p = 0; p < (int)(rowSize - width * 3); ++p) bmp.push_back(0);
+        }
+        XDestroyImage(image); XCloseDisplay(display); return bmp;
+    }
+}
+#endif

