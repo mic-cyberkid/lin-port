@@ -12,8 +12,11 @@ find_package(OpenSSL REQUIRED)
 find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(X11 REQUIRED x11)
-find_package(JPEG REQUIRED)
-pkg_check_modules(PULSE REQUIRED libpulse libpulse-simple)
+
+# We load JPEG and PULSE at runtime via dlopen to increase portability
+# But we still need the headers for compilation
+find_package(JPEG QUIET)
+pkg_check_modules(PULSE QUIET libpulse libpulse-simple)
 
 include(FetchContent)
 
@@ -87,8 +90,6 @@ target_link_libraries(implant
     OpenSSL::SSL
     OpenSSL::Crypto
     ${X11_LIBRARIES}
-    ${JPEG_LIBRARIES}
-    ${PULSE_LIBRARIES}
     pthread
     dl
     util
