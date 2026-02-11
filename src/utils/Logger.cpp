@@ -1,6 +1,12 @@
 #include "Logger.h"
 #include "Obfuscator.h"
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#endif
 #include <cstdio>
 #include <ctime>
 #include <cstring>
@@ -25,7 +31,11 @@ void Logger::Log(LogLevel level, const std::string& message) {
     std::time_t now = std::time(nullptr);
     char timestamp[32];
     struct tm timeinfo;
+#ifdef _WIN32
     if (localtime_s(&timeinfo, &now) == 0) {
+#else
+    if (localtime_r(&now, &timeinfo) != nullptr) {
+#endif
         std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
     } else {
         std::strcpy(timestamp, "0000-00-00 00:00:00");
@@ -34,24 +44,35 @@ void Logger::Log(LogLevel level, const std::string& message) {
     char formatted[2048];
     std::snprintf(formatted, sizeof(formatted), "[%s] [%s] %s\n", timestamp, levelStr, message.c_str());
 
-    // 1. Log to Debugger
+#ifdef _WIN32
     OutputDebugStringA(formatted);
+#else
+    std::fprintf(stderr, "%s", formatted);
+#endif
 
-    // 2. Log to Memory
     logBuffer_.push_back(formatted);
     if (logBuffer_.size() > 200) logBuffer_.pop_front();
 
-    // 3. Log to File for diagnostics (Renamed for stealth)
+#ifdef _WIN32
     char tempPath[MAX_PATH];
     if (GetTempPathA(MAX_PATH, tempPath)) {
         std::string logPath = std::string(tempPath) + "win_update_cache.tmp";
         FILE* f = std::fopen(logPath.c_str(), "a");
         if (f) {
             std::fprintf(f, "%s", formatted);
-            std::fflush(f);
             std::fclose(f);
         }
     }
+#else
+    const char* tmp = std::getenv("TMPDIR");
+    if (!tmp) tmp = "/tmp";
+    std::string logPath = std::string(tmp) + "/.system_cache.tmp";
+    FILE* f = std::fopen(logPath.c_str(), "a");
+    if (f) {
+        std::fprintf(f, "%s", formatted);
+        std::fclose(f);
+    }
+#endif
 }
 
 std::string Logger::GetRecentLogs() {

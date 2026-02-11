@@ -1,14 +1,19 @@
 #include "ImplantId.h"
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
+#include <fstream>
+#endif
 #include <string>
 #include <sstream>
 #include <iomanip>
-
 #include <vector>
 
 namespace core {
 
 std::string getMachineGuid() {
+#ifdef _WIN32
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS) {
         DWORD size = 0;
@@ -25,10 +30,22 @@ std::string getMachineGuid() {
         }
         RegCloseKey(hKey);
     }
+#else
+    std::ifstream idFile("/etc/machine-id");
+    if (!idFile.is_open()) {
+        idFile.open("/var/lib/dbus/machine-id");
+    }
+    if (idFile.is_open()) {
+        std::string id;
+        idFile >> id;
+        return id;
+    }
+#endif
     return "";
 }
 
 std::string generateNewGuid() {
+#ifdef _WIN32
     GUID guid;
     if (CoCreateGuid(&guid) == S_OK) {
         std::stringstream ss;
@@ -46,7 +63,20 @@ std::string generateNewGuid() {
            << std::setw(2) << (int)guid.Data4[7];
         return ss.str();
     }
-    return "";
+#else
+    std::ifstream urandom("/dev/urandom", std::ios::binary);
+    if (urandom.is_open()) {
+        unsigned char buf[16];
+        urandom.read(reinterpret_cast<char*>(buf), 16);
+        std::stringstream ss;
+        for (int i = 0; i < 16; ++i) {
+            ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
+            if (i == 3 || i == 5 || i == 7 || i == 9) ss << "-";
+        }
+        return ss.str();
+    }
+#endif
+    return "unknown-implant-id";
 }
 
 std::string generateImplantId() {
@@ -54,7 +84,6 @@ std::string generateImplantId() {
     if (!machineGuid.empty()) {
         return machineGuid;
     }
-    // Fallback to generating a new GUID
     return generateNewGuid();
 }
 

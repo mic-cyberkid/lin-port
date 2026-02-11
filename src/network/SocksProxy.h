@@ -1,12 +1,16 @@
 #pragma once
+#ifdef _WIN32
 #include <winsock2.h>
-#include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+typedef int SOCKET;
+#define INVALID_SOCKET -1
+#endif
 #include <string>
-#include <thread>
 #include <atomic>
-#include <vector>
-
-#pragma comment(lib, "Ws2_32.lib")
+#include <thread>
 
 namespace network {
 
@@ -17,16 +21,14 @@ public:
 
     bool Start(int port);
     void Stop();
-    bool IsRunning() const { return m_running; }
+    bool IsRunning() const { return isRunning_; }
 
 private:
-    void ListenThread(int port);
-    void HandleClient(SOCKET clientSocket);
-    static void Relay(SOCKET from, SOCKET to);
+    std::atomic<bool> isRunning_;
+    std::thread proxyThread_;
+    SOCKET listenSocket_;
 
-    std::atomic<bool> m_running{ false };
-    std::thread m_listenThread;
-    SOCKET m_listenSocket = INVALID_SOCKET;
+    void ProxyLoop(int port);
 };
 
 } // namespace network

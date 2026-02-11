@@ -8,14 +8,21 @@ on:
 
 jobs:
   build:
-    name: Build and Test (${{ matrix.build_type }})
-    runs-on: windows-latest
+    name: Build and Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-22.04, windows-latest]
         build_type: [Release]
 
     steps:
     - uses: actions/checkout@v3
+
+    - name: Install Linux Dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev libx11-dev libxext-dev libxfixes-dev libxdamage-dev libjpeg-dev libv4l-dev libpulse-dev pkg-config libsqlite3-dev
 
     - name: Cache dependencies
       uses: actions/cache@v3
@@ -32,14 +39,37 @@ jobs:
     - name: Build All
       run: cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
 
-    - name: Run Unit Tests
-      shell: pwsh
+    - name: Run Unit Tests (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        cd ${{github.workspace}}/build
+        ./unit_tests
+
+    - name: Run Unit Tests (Windows)
+      if: runner.os == 'Windows'
       run: |
         cd ${{github.workspace}}/build/${{matrix.build_type}}
-        D:\a\bennin-test\bennin-test\build\Release\main.exe
+        ./unit_tests.exe
 
-    - name: Upload Build Artifacts
+    - name: Interaction Test (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        cd ${{github.workspace}}/build
+        ./implant &
+        echo "Implant started in background, waiting 4 minutes for interaction testing..."
+        sleep 240
+        echo "Interaction test complete."
+
+    - name: Upload Linux Artifacts
+      if: runner.os == 'Linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-implant-${{matrix.build_type}}
+        path: ${{github.workspace}}/build/implant
+
+    - name: Upload Windows Artifacts
+      if: runner.os == 'Windows'
       uses: actions/upload-artifact@v4
       with:
         name: windows-implant-${{matrix.build_type}}
-        path: ${{github.workspace}}/build/${{matrix.build_type}}/main.exe
+        path: ${{github.workspace}}/build/${{matrix.build_type}}/implant.exe

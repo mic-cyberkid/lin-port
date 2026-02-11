@@ -2,19 +2,18 @@
 #include "Task.h"
 #include "../external/concurrentqueue/concurrentqueue.h"
 #include "../network/SocksProxy.h"
-
 namespace beacon {
-
-struct Result; // Forward declaration
-
+struct Result {
+    std::string task_id;
+    std::string output;
+    std::string error;
+};
 class TaskDispatcher {
 public:
     TaskDispatcher(moodycamel::ConcurrentQueue<Result>& pendingResults);
     void dispatch(const Task& task);
-
 private:
     moodycamel::ConcurrentQueue<Result>& pendingResults_;
     network::SocksProxy m_socksProxy;
 };
-
-} // namespace beacon
+}

