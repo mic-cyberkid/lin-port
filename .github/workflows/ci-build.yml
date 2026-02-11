@@ -8,18 +8,16 @@ on:
 
 jobs:
   build:
-    name: Build and Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Build and Test (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
-        os: [ubuntu-22.04, windows-latest]
         build_type: [Release]
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install Linux Dependencies
-      if: runner.os == 'Linux'
+    - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y libssl-dev libx11-dev libxext-dev libxfixes-dev libxdamage-dev libjpeg-dev libv4l-dev libpulse-dev pkg-config libsqlite3-dev
@@ -39,37 +37,21 @@ jobs:
     - name: Build All
       run: cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
 
-    - name: Run Unit Tests (Linux)
-      if: runner.os == 'Linux'
+    - name: Run Unit Tests
       run: |
         cd ${{github.workspace}}/build
         ./unit_tests
 
-    - name: Run Unit Tests (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        cd ${{github.workspace}}/build/${{matrix.build_type}}
-        ./unit_tests.exe
-
-    - name: Interaction Test (Linux)
-      if: runner.os == 'Linux'
+    - name: Interaction Test
       run: |
         cd ${{github.workspace}}/build
         ./implant &
-        echo "Implant started in background, waiting 4 minutes for interaction testing..."
-        sleep 240
+        echo "Implant started in background, waiting 2 minutes for interaction testing..."
+        sleep 120
         echo "Interaction test complete."
 
-    - name: Upload Linux Artifacts
-      if: runner.os == 'Linux'
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: linux-implant-${{matrix.build_type}}
         path: ${{github.workspace}}/build/implant
-
-    - name: Upload Windows Artifacts
-      if: runner.os == 'Windows'
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-implant-${{matrix.build_type}}
-        path: ${{github.workspace}}/build/${{matrix.build_type}}/implant.exe

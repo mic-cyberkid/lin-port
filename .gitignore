@@ -1,11 +1,12 @@
 # CMake
+build/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 compile_commands.json
 CTestTestfile.cmake
 
-# Visual Studio
+# Visual Studio (Legacy)
 .vs/
 *.sln
 *.vcxproj
@@ -13,6 +14,8 @@ CTestTestfile.cmake
 *.vcxproj.user
 
 # Binaries
+implant
+unit_tests
 *.exe
 *.dll
 *.so
@@ -23,3 +26,4 @@ CTestTestfile.cmake
 *.log
 *.tmp
 *.bak
+.DS_Store

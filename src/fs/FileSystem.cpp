@@ -1,5 +1,5 @@
 #include "FileSystem.h"
-#include "../external/nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
 #include <filesystem>
 #include <fstream>
 #include <chrono>
