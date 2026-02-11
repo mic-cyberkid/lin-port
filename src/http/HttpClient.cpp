@@ -30,23 +30,40 @@ std::vector<BYTE> HttpClient::post(const std::string& server, const std::string&
     return request("POST", server, path, data, headers);
 }
 std::vector<BYTE> HttpClient::request(const std::string& method, const std::string& server, const std::string& path, const std::vector<BYTE>& data, const std::string& headers) {
-    BIO* bio = BIO_new_ssl_connect(SSL_CTX_new(TLS_client_method()));
+    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
+    if (!ctx) throw std::runtime_error("Failed to create SSL_CTX");
+
+    // In CI we might need to bypass verification if certs are missing, but let's try default first
+    SSL_CTX_set_default_verify_paths(ctx);
+
+    BIO* bio = BIO_new_ssl_connect(ctx);
+    if (!bio) { SSL_CTX_free(ctx); throw std::runtime_error("Failed to create BIO"); }
+
     SSL* ssl;
     BIO_get_ssl(bio, &ssl);
     SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
     std::string conn = server + ":443";
     BIO_set_conn_hostname(bio, conn.c_str());
     if (BIO_do_connect(bio) <= 0) {
+        char err[256];
+        ERR_error_string_n(ERR_get_error(), err, sizeof(err));
         BIO_free_all(bio);
-        throw std::runtime_error("Failed to connect");
+        // SSL_CTX_free(ctx); // BIO_free_all handles ctx if it's the first in chain? No, BIO_new_ssl_connect takes ownership.
+        throw std::runtime_error(std::string("Failed to connect: ") + err);
     }
     std::stringstream ss;
-    ss << method << " " << path << " HTTP/1.1\r\nHost: " << server << "\r\nUser-Agent: " << userAgent_ << "\r\nConnection: close\r\n" << headers;
+    ss << method << " " << path << " HTTP/1.1\r\n";
+    ss << "Host: " << server << "\r\n";
+    ss << "User-Agent: " << userAgent_ << "\r\n";
+    ss << "Accept: */*\r\n";
+    ss << "Accept-Encoding: identity\r\n";
+    ss << "Connection: close\r\n";
+    if (!headers.empty()) ss << headers;
     if (method == "POST") ss << "Content-Length: " << data.size() << "\r\n";
     ss << "\r\n";
     std::string req = ss.str();
-    BIO_write(bio, req.c_str(), req.length());
-    if (method == "POST" && !data.empty()) BIO_write(bio, data.data(), data.size());
+    BIO_write(bio, req.c_str(), (int)req.length());
+    if (method == "POST" && !data.empty()) BIO_write(bio, data.data(), (int)data.size());
     std::vector<BYTE> response;
     char buf[4096];
     int n;

