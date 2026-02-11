@@ -1,15 +1,4 @@
 #include "Webcam.h"
-#ifdef _WIN32
-#include <vfw.h>
-#include <gdiplus.h>
-#include <vector>
-#pragma comment(lib, "vfw32.lib")
-#pragma comment(lib, "gdiplus.lib")
-using namespace Gdiplus;
-namespace capture {
-    std::vector<BYTE> CaptureWebcamImage() { return {}; }
-}
-#else
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -17,6 +6,7 @@ namespace capture {
 #include <linux/videodev2.h>
 #include <vector>
 #include <cstring>
+
 namespace capture {
     std::vector<uint8_t> CaptureWebcamImage() {
         int fd = open("/dev/video0", O_RDWR);
@@ -42,4 +32,3 @@ namespace capture {
         ioctl(fd, VIDIOC_STREAMOFF, &buf.type); munmap(start, buf.length); close(fd); return res;
     }
 }
-#endif

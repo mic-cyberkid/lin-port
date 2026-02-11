@@ -2,7 +2,7 @@
 
 #include <string>
 #include <vector>
-#include "../external/nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
 
 namespace recon {
 

